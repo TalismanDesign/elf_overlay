@@ -2,7 +2,7 @@
   "name": "elf_overlay",
   "version": "1.0.0",
   "description": "Universal, ISA-abstracted ELF overlay runtime library",
-  "keywords": "overlay, elf, xtensa, riscv, embedded",
+  "keywords": ["overlay", "elf", "xtensa", "riscv", "embedded"],
   "repository": {
     "type": "git",
     "url": "https://github.com/TalismanDesign/elf_overlay"
@@ -26,11 +26,15 @@
   ],
   "build": {
     "srcFilter": [
-      "+<include/>",
-      "+<src/core/>",
-      "+<src/isa/>",
-      "+<src/port/>",
-      "-<*>"
+      "+<*>",
+      "-<tools/>",
+      "-<tests/>",
+      "-<build/>",
+      "-<cmake/>",
+      "-<docs/>"
+    ],
+    "flags": [
+      "-DELF_OVERLAY_ESP_IDF=1"
     ]
   }
 }
