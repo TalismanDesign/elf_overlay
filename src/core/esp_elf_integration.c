@@ -13,8 +13,14 @@ int elf_overlay_esp_elf_set_section_map(elf_overlay_loader_t *loader, esp_elf_t 
     elf_overlay_section_map_t map;
     memset(&map, 0, sizeof(map));
 
+#ifndef ELF_SECS
+#error "ELF_SECS not defined; esp_elf.h (elf_loader) must be on the include path"
+#endif
+    size_t n = ELF_OVERLAY_MAX_SECTIONS;
+    if ((size_t)ELF_SECS < n) n = (size_t)ELF_SECS;
+
     /* esp_elf_t.sec[] entries with size == 0 are unused. */
-    for (int i = 0; i < ELF_OVERLAY_MAX_SECTIONS; i++) {
+    for (size_t i = 0; i < n; i++) {
         if (elf->sec[i].size == 0) continue;
         map.entries[i].v_addr = (uint32_t)elf->sec[i].v_addr;
         map.entries[i].addr = (uint32_t)elf->sec[i].addr;

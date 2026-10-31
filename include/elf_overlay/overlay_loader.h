@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "elf_overlay/config.h"
 #include "elf_overlay/errors.h"
 
 #ifdef __cplusplus
@@ -18,7 +19,7 @@ typedef struct elf_overlay_section_map_entry {
 } elf_overlay_section_map_entry_t;
 
 typedef struct elf_overlay_section_map {
-    elf_overlay_section_map_entry_t entries[8];
+    elf_overlay_section_map_entry_t entries[ELF_OVERLAY_MAX_SECTIONS];
 } elf_overlay_section_map_t;
 
 /* Load/unload */

@@ -155,7 +155,7 @@ void *elf_overlay_enter(uint32_t key) {
         for (uint16_t i = 0; i < l->patch_count; i++) {
             if (l->patches[i].overlay_id == overlay_id) {
                 uint16_t boff = l->patches[i].blob_offset;
-                if (boff + 4 > ov_len) continue;
+                if ((size_t)boff + 4 > ov_len) continue;
                 uint32_t *w = (uint32_t *)(staging + boff);
                 uint32_t resident = 0;
                 if (elf_overlay_resolve(l, *w, &resident) == ELF_OVERLAY_OK) {
@@ -175,7 +175,7 @@ void *elf_overlay_enter(uint32_t key) {
         for (uint16_t i = 0; i < l->stub_patch_count; i++) {
             if (l->stub_patches[i].overlay_id == overlay_id) {
                 uint16_t boff = l->stub_patches[i].blob_offset;
-                if (boff + 4 > ov_len || !l->stub_block) continue;
+                if ((size_t)boff + 4 > ov_len || !l->stub_block) continue;
                 uint32_t *w = (uint32_t *)(staging + boff);
                 *w = (uint32_t)(uintptr_t)l->stub_block + *w;
                 uint16_t insn_off = l->stub_patches[i].insn_offset;
@@ -193,7 +193,7 @@ void *elf_overlay_enter(uint32_t key) {
         for (uint16_t i = 0; i < l->host_ref_count; i++) {
             if (l->host_refs[i].overlay_id == overlay_id) {
                 uint16_t boff = l->host_refs[i].blob_offset;
-                if (boff + 4 > ov_len) continue;
+                if ((size_t)boff + 4 > ov_len) continue;
                 uint32_t *w = (uint32_t *)(staging + boff);
                 const char *name = l->strtab + l->host_refs[i].name_off;
                 uintptr_t sym = 0;
