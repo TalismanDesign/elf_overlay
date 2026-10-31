@@ -35,6 +35,7 @@ typedef struct elf_reloc {
     uint32_t r_offset;
     uint32_t r_info;
     int32_t r_addend;
+    char *symbol;
 } elf_reloc_t;
 
 typedef struct elf_reader {

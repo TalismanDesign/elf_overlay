@@ -8,10 +8,12 @@
 extern "C" {
 #endif
 
-/* Xtensa relocation type numbers */
-#define R_XTENSA_RELATIVE 19
-#define R_XTENSA_JMP_SLOT 18
+/* Xtensa dynamic relocation type numbers, per the Espressif Xtensa ISA
+ * reference, chapter 5 (ELF Object Files). */
 #define R_XTENSA_RTLD     2
+#define R_XTENSA_GLOB_DAT 3
+#define R_XTENSA_JMP_SLOT 4
+#define R_XTENSA_RELATIVE 5
 
 #define XTENSA_RELATIVE_STR "R_XTENSA_RELATIVE"
 #define XTENSA_JMP_SLOT_STR "R_XTENSA_JMP_SLOT"

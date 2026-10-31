@@ -69,7 +69,10 @@ static int xtensa_encode_patch(uint8_t *insn, size_t insn_len,
     int32_t imm = delta >> 2;
     if (imm < -0x8000 || imm > 0x7FFF) return -1;
     
-    insn[0] = XTENSA_L32R_OP0 | (site->reg << 4);
+    uint8_t reg = (insn[0] >> 4) & 0xF;
+    (void)site;
+
+    insn[0] = XTENSA_L32R_OP0 | (reg << 4);
     insn[1] = (uint8_t)(imm & 0xFF);
     insn[2] = (uint8_t)((imm >> 8) & 0xFF);
     
@@ -109,4 +112,3 @@ static const elf_overlay_isa_ops_t xtensa_ops = {
 void elf_overlay_xtensa_init(void) {
     elf_overlay_isa_register(&xtensa_ops);
 }
-

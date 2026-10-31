@@ -17,7 +17,7 @@ int main() {
 
     /* Case 1: target 4 bytes after aligned pc */
     {
-        uint8_t insn[3] = {0};
+        uint8_t insn[3] = {0xA1, 0, 0};
         elf_overlay_patch_site_t site = { .reg = 10 };
         int r = isa->encode_patch(insn, 3, 0x100, 0x104, &site);
         assert(r == 0);
@@ -30,7 +30,7 @@ int main() {
 
     /* Case 2: negative imm, matches encode_l32r(0x208, 8, 0x1C8) == 81f0ff */
     {
-        uint8_t insn[3] = {0};
+        uint8_t insn[3] = {0x81, 0, 0};
         elf_overlay_patch_site_t site = { .reg = 8 };
         int r = isa->encode_patch(insn, 3, 0x208, 0x1C8, &site);
         assert(r == 0);
@@ -42,7 +42,7 @@ int main() {
 
     /* Case 3: matches encode_l32r(0x1EB, 8, 0x1B8) == 81f3ff */
     {
-        uint8_t insn[3] = {0};
+        uint8_t insn[3] = {0x81, 0, 0};
         elf_overlay_patch_site_t site = { .reg = 8 };
         int r = isa->encode_patch(insn, 3, 0x1EB, 0x1B8, &site);
         assert(r == 0);
@@ -54,7 +54,7 @@ int main() {
 
     /* Case 3: out of range */
     {
-        uint8_t insn[3] = {0};
+        uint8_t insn[3] = {0xA1, 0, 0};
         elf_overlay_patch_site_t site = { .reg = 10 };
         /* delta too large for 16-bit imm */
         int r = isa->encode_patch(insn, 3, 0x100, 0x100000, &site);
@@ -63,7 +63,7 @@ int main() {
 
     /* Case 4: unaligned delta */
     {
-        uint8_t insn[3] = {0};
+        uint8_t insn[3] = {0xA1, 0, 0};
         elf_overlay_patch_site_t site = { .reg = 10 };
         int r = isa->encode_patch(insn, 3, 0x100, 0x103, &site);
         assert(r != 0);

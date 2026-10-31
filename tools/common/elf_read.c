@@ -130,6 +130,9 @@ void elf_reader_close(elf_reader_t *reader) {
         free(reader->symbols[i].name);
     }
     free(reader->symbols);
+    for (size_t i = 0; i < reader->reloc_count; i++) {
+        free(reader->relocs[i].symbol);
+    }
     free(reader->relocs);
     memset(reader, 0, sizeof(*reader));
 }
@@ -173,7 +176,7 @@ static int load_sections(elf_reader_t *reader) {
         sec->addralign = u32(s->sh_addralign);
         sec->entsize = u32(s->sh_entsize);
         
-        if (sec->type == SHT_PROGBITS && sec->size > 0 &&
+        if (sec->type != SHT_NOBITS && sec->size > 0 &&
             sec->offset + sec->size <= reader->size) {
             sec->data = malloc(sec->size);
             if (sec->data) {
@@ -238,13 +241,30 @@ static int load_relocs(elf_reader_t *reader) {
     for (size_t i = 0; i < reader->section_count; i++) {
         elf_section_t *sec = &reader->sections[i];
         if (sec->type != SHT_RELA || !sec->data) continue;
+        elf_section_t *symtab = sec->link < reader->section_count ?
+                                &reader->sections[sec->link] : NULL;
+        elf_section_t *strtab = (symtab && symtab->link < reader->section_count) ?
+                                &reader->sections[symtab->link] : NULL;
+        const elf32_sym_raw_t *syms = (symtab && symtab->data) ?
+                                      (const elf32_sym_raw_t *)symtab->data : NULL;
+        const char *strs = (strtab && strtab->data) ? (const char *)strtab->data : NULL;
+        size_t sym_count = symtab && symtab->entsize ?
+                           symtab->size / symtab->entsize : 0;
         
         size_t n = sec->size / sizeof(elf32_rela_raw_t);
         const elf32_rela_raw_t *relas = (const elf32_rela_raw_t *)sec->data;
         for (size_t j = 0; j < n; j++) {
+            uint32_t info = u32(relas[j].r_info);
+            uint32_t sym_index = info >> 8;
             reader->relocs[idx].r_offset = u32(relas[j].r_offset);
-            reader->relocs[idx].r_info = u32(relas[j].r_info);
+            reader->relocs[idx].r_info = info;
             reader->relocs[idx].r_addend = i32(relas[j].r_addend);
+            if (syms && strs && sym_index < sym_count) {
+                uint32_t name_off = u32(syms[sym_index].st_name);
+                if (name_off < strtab->size) {
+                    reader->relocs[idx].symbol = strdup(strs + name_off);
+                }
+            }
             idx++;
         }
     }

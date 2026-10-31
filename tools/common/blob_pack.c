@@ -66,7 +66,8 @@ size_t elf_overlay_pack_blob(const pack_manifest_t *m, uint8_t *out, size_t out_
         memset(&e, 0, sizeof(e));
         e.id = m->overlays[i].id;
         e.pad = 0;
-        e.offset = m->overlays[i].offset;
+        e.offset = (uint32_t)(stub_block_off + m->stub_block_size +
+                              m->overlays[i].offset);
         e.length = m->overlays[i].length;
         memcpy(out + off, &e, sizeof(e)); off += sizeof(e);
     }

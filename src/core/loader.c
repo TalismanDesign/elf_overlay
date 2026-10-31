@@ -125,6 +125,14 @@ void *elf_overlay_enter(uint32_t key) {
         
         size_t read_off = ov->offset;
         size_t ov_len = ov->length;
+        /* The frame must hold the body plus the up-to-3-byte zero pad that the
+         * word-store exec copy writes for a non-word-multiple length. */
+        if (ov_len + ELF_OVERLAY_ALIGN > l->frame_size) {
+            elf_overlay_log_error(TAG, "overlay %u too large: %u > frame %u",
+                                  overlay_id, (unsigned)ov_len,
+                                  (unsigned)l->frame_size);
+            return NULL;
+        }
         
         uint8_t *staging = elf_overlay_alloc_rw(ov_len);
         if (!staging) return NULL;
@@ -155,8 +163,9 @@ void *elf_overlay_enter(uint32_t key) {
                     if (insn_off != 0 && insn_off + insn_len <= ov_len) {
                         if (isa && isa->encode_patch) {
                             uint32_t pc_runtime = body_base + insn_off;
+                            uint32_t literal_addr = body_base + boff;
                             isa->encode_patch(staging + insn_off, insn_len,
-                                              pc_runtime, *w,
+                                              pc_runtime, literal_addr,
                                               &(elf_overlay_patch_site_t){ .reg = 0 });
                         }
                     }
@@ -173,8 +182,9 @@ void *elf_overlay_enter(uint32_t key) {
                 if (insn_off != 0 && insn_off + insn_len <= ov_len) {
                     if (isa && isa->encode_patch) {
                         uint32_t pc_runtime = body_base + insn_off;
+                        uint32_t literal_addr = body_base + boff;
                         isa->encode_patch(staging + insn_off, insn_len,
-                                          pc_runtime, *w,
+                                          pc_runtime, literal_addr,
                                           &(elf_overlay_patch_site_t){ .reg = 0 });
                     }
                 }
@@ -195,16 +205,17 @@ void *elf_overlay_enter(uint32_t key) {
                 if (insn_off != 0 && insn_off + insn_len <= ov_len) {
                     if (isa && isa->encode_patch) {
                         uint32_t pc_runtime = body_base + insn_off;
+                        uint32_t literal_addr = body_base + boff;
                         isa->encode_patch(staging + insn_off, insn_len,
-                                          pc_runtime, *w,
+                                          pc_runtime, literal_addr,
                                           &(elf_overlay_patch_site_t){ .reg = 0 });
                     }
                 }
             }
         }
         
-        memcpy(l->frames[slot].base, staging, ov_len);
-        elf_overlay_sync();
+        elf_overlay_copy_exec(l->frames[slot].base, staging, ov_len);
+        elf_overlay_sync_exec(l->frames[slot].base, ov_len);
         elf_overlay_free(staging);
         
         l->frames[slot].overlay_id = overlay_id;
@@ -220,6 +231,9 @@ void *elf_overlay_enter(uint32_t key) {
     l->frames[slot].last_use = ++l->clock;
     uint32_t body_off = key & 0xFFFF;
     if (body_off >= l->frames[slot].body_len) {
+        elf_overlay_log_error(TAG, "bad body off ov=%u off=0x%x len=0x%x",
+                              overlay_id, body_off,
+                              (unsigned)l->frames[slot].body_len);
         return NULL;
     }
     return (void *)(l->frames[slot].base + body_off);
@@ -329,17 +343,24 @@ int elf_overlay_load(elf_overlay_loader_t **out, const char *path) {
     if (l->stub_block_size > 0) {
         l->stub_block = elf_overlay_alloc_exec(l->stub_block_size);
         if (!l->stub_block) { elf_overlay_unload(l); return ELF_OVERLAY_ERR_MEM; }
-        if (elf_overlay_file_read(l->file, l->hdr.stub_block_off, l->stub_block, l->stub_block_size) != 0) {
+        uint8_t *stub_staging = elf_overlay_alloc_rw(l->stub_block_size);
+        if (!stub_staging) { elf_overlay_unload(l); return ELF_OVERLAY_ERR_MEM; }
+        if (elf_overlay_file_read(l->file, l->hdr.stub_block_off, stub_staging, l->stub_block_size) != 0) {
+            elf_overlay_free(stub_staging);
             elf_overlay_unload(l); return ELF_OVERLAY_ERR_IO;
         }
-        /* Wire enter/leave slots if present */
-        if (l->hdr.slot_enter < l->stub_block_size) {
-            *(uint32_t *)((uint8_t *)l->stub_block + l->hdr.slot_enter) = (uint32_t)(uintptr_t)&elf_overlay_enter;
+        /* Wire enter/leave slots in the staging copy before it reaches IRAM. */
+        if (l->hdr.slot_enter + 4 <= l->stub_block_size) {
+            uint32_t v = (uint32_t)(uintptr_t)&elf_overlay_enter;
+            memcpy(stub_staging + l->hdr.slot_enter, &v, 4);
         }
-        if (l->hdr.slot_leave < l->stub_block_size) {
-            *(uint32_t *)((uint8_t *)l->stub_block + l->hdr.slot_leave) = (uint32_t)(uintptr_t)&elf_overlay_leave;
+        if (l->hdr.slot_leave + 4 <= l->stub_block_size) {
+            uint32_t v = (uint32_t)(uintptr_t)&elf_overlay_leave;
+            memcpy(stub_staging + l->hdr.slot_leave, &v, 4);
         }
-        elf_overlay_sync();
+        elf_overlay_copy_exec(l->stub_block, stub_staging, l->stub_block_size);
+        elf_overlay_sync_exec(l->stub_block, l->stub_block_size);
+        elf_overlay_free(stub_staging);
     }
     
     l->frame_count = ELF_OVERLAY_MAX_FRAMES;
@@ -437,8 +458,8 @@ int elf_overlay_apply_redirects(elf_overlay_loader_t *loader) {
         uint32_t dst = 0;
         if (elf_overlay_resolve(loader, site, &dst) != ELF_OVERLAY_OK) continue;
         *(uint32_t *)(uintptr_t)dst = val;
+        elf_overlay_sync_exec((void *)(uintptr_t)dst, 4);
     }
-    elf_overlay_sync();
     return ELF_OVERLAY_OK;
 }
 
