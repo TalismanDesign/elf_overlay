@@ -1,0 +1,81 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Validate packaging and registry checks without publishing anything'
+        type: boolean
+        default: false
+
+jobs:
+  guard:
+    name: Verify tag matches manifests
+    if: github.event_name == 'release'
+    environment: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check manifest versions
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION="${VERSION#v}"
+          LIB_VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' library.json | head -n1)"
+          IDF_VERSION="$(sed -n 's/^version:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}.*/\1/p' idf_component.yml | head -n1)"
+          echo "tag=$VERSION library.json=$LIB_VERSION idf_component.yml=$IDF_VERSION"
+          if [ "$LIB_VERSION" != "$VERSION" ] || [ "$IDF_VERSION" != "$VERSION" ]; then
+            echo "::error::Release tag ($VERSION) does not match both manifests"
+            exit 1
+          fi
+
+  esp-registry:
+    name: Publish to ESP Component Registry
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || needs.guard.result == 'success') }}
+    environment: release
+    needs: guard
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Upload component
+        uses: espressif/upload-components-ci-action@v2
+        with:
+          namespace: talismandesign
+          components: "elf_overlay:."
+          dry_run: ${{ inputs.dry_run || false }}
+
+  platformio:
+    name: Publish to PlatformIO Registry
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || needs.guard.result == 'success') }}
+    environment: release
+    needs: guard
+    runs-on: ubuntu-latest
+    env:
+      PLATFORMIO_AUTH_TOKEN: ${{ secrets.PLATFORMIO_AUTH_TOKEN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO Core
+        run: pip install --upgrade platformio
+
+      - name: Publish library
+        if: ${{ !(inputs.dry_run || false) }}
+        run: pio pkg publish --no-notify --no-interactive
+
+      - name: Dry run package
+        if: ${{ inputs.dry_run || false }}
+        run: pio pkg pack --output .
