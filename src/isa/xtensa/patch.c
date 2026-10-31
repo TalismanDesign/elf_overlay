@@ -90,11 +90,11 @@ static size_t xtensa_get_insn_len(void) {
 }
 
 static size_t xtensa_get_stub_stride(void) {
-    return 64;
+    return ELF_OVERLAY_XTENSA_STUB_STRIDE;
 }
 
 static size_t xtensa_get_stub_alignment(void) {
-    return 4;
+    return ELF_OVERLAY_STUB_ALIGNMENT;
 }
 
 static const elf_overlay_isa_ops_t xtensa_ops = {
@@ -103,7 +103,6 @@ static const elf_overlay_isa_ops_t xtensa_ops = {
     .find_patch_sites = xtensa_find_patch_sites,
     .encode_patch = xtensa_encode_patch,
     .is_patch_valid = xtensa_is_patch_valid,
-    .generate_stub = NULL,
     .get_insn_len = xtensa_get_insn_len,
     .get_stub_stride = xtensa_get_stub_stride,
     .get_stub_alignment = xtensa_get_stub_alignment

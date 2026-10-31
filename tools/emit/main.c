@@ -7,7 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define XTENSA_STUB_STRIDE 44
+#define XTENSA_STUB_STRIDE ELF_OVERLAY_XTENSA_STUB_STRIDE
 
 static int find_tool(char *out, size_t out_size, const char *name) {
     const char *path = getenv("PATH");

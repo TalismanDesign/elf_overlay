@@ -15,19 +15,20 @@ extern "C" {
 #define ELF_OVERLAY_ISA_ARM     3
 #define ELF_OVERLAY_ISA_AARCH64 4
 
+/* Per-stub byte stride in the generated stub block. */
+#define ELF_OVERLAY_XTENSA_STUB_STRIDE 44
+#define ELF_OVERLAY_RISCV_STUB_STRIDE  32
+#define ELF_OVERLAY_STUB_ALIGNMENT     4
+
+/* Fixed slot block ahead of the stubs: enter + leave function pointers. */
+#define ELF_OVERLAY_STUB_SLOTS_SIZE 8
+
 /* Patch site info for ISA-specific instruction patching */
 typedef struct elf_overlay_patch_site {
     uint16_t insn_offset;  /* offset of instruction in code */
     uint8_t reg;           /* destination register */
     int32_t imm;           /* immediate value */
 } elf_overlay_patch_site_t;
-
-/* Stub descriptor */
-typedef struct elf_overlay_stub_desc {
-    uint32_t key;
-    uint32_t enter_func;
-    uint32_t leave_func;
-} elf_overlay_stub_desc_t;
 
 struct elf_overlay_isa_ops;
 
@@ -53,12 +54,9 @@ typedef struct elf_overlay_isa_ops {
     /* Get instruction length in bytes for this ISA */
     size_t (*get_insn_len)(void);
     
-    /* Generate stub code */
-    int (*generate_stub)(const elf_overlay_stub_desc_t *desc,
-                         uint8_t *out, size_t out_size,
-                         size_t *out_len);
-    
-    /* Get stub stride/alignment */
+    /* Get stub stride/alignment. Stub bodies themselves are assembled by the
+     * host emit tool, not generated at runtime, so the runtime vtable only 
+     * reports their layout. */
     size_t (*get_stub_stride)(void);
     size_t (*get_stub_alignment)(void);
 } elf_overlay_isa_ops_t;

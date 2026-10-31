@@ -190,6 +190,7 @@ void *elf_overlay_enter(uint32_t key) {
                 }
             }
         }
+        int host_ref_failed = 0;
         for (uint16_t i = 0; i < l->host_ref_count; i++) {
             if (l->host_refs[i].overlay_id == overlay_id) {
                 uint16_t boff = l->host_refs[i].blob_offset;
@@ -199,6 +200,17 @@ void *elf_overlay_enter(uint32_t key) {
                 uintptr_t sym = 0;
                 if (l->symbol_resolver) {
                     sym = l->symbol_resolver(name);
+                }
+                /* An unresolved host symbol must abort the page-in: writing 0
+                 * here would leave a null call/load target that faults the
+                 * moment the overlay code runs, with no diagnostic. Fail loud
+                 * instead. */
+                if (sym == 0) {
+                    elf_overlay_log_error(TAG,
+                        "overlay %u: unresolved host symbol '%s'",
+                        overlay_id, name);
+                    host_ref_failed = 1;
+                    break;
                 }
                 *w = (uint32_t)sym;
                 uint16_t insn_off = l->host_refs[i].insn_offset;
@@ -212,6 +224,10 @@ void *elf_overlay_enter(uint32_t key) {
                     }
                 }
             }
+        }
+        if (host_ref_failed) {
+            elf_overlay_free(staging);
+            return NULL;
         }
         
         elf_overlay_copy_exec(l->frames[slot].base, staging, ov_len);

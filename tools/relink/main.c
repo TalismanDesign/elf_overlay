@@ -21,13 +21,8 @@ void elf_overlay_riscv_init(void);
 #define EM_ARM 40
 #endif
 
-#define POOL_ALIGN 4
-#define STUB_SLOTS_SIZE 8
-#define XTENSA_STUB_STRIDE 44
-
-static size_t align_up(size_t v, size_t a) {
-    return (v + a - 1) & ~(a - 1);
-}
+#define STUB_SLOTS_SIZE ELF_OVERLAY_STUB_SLOTS_SIZE
+#define XTENSA_STUB_STRIDE ELF_OVERLAY_XTENSA_STUB_STRIDE
 
 /* Read a 32-bit word from ELF section data at the given virtual address.
  * Returns 0 if the address is not in any loaded section. */
@@ -41,6 +36,22 @@ static uint32_t read_word_at(elf_reader_t *reader, uint32_t addr) {
     uint32_t val;
     memcpy(&val, sec->data + off, 4);
     return val;
+}
+
+/* Find a dynamic relocation whose r_offset matches the given virtual address.
+ * Returns the matching reloc, or NULL. The returned type (low byte of r_info)
+ * and symbol name let a caller decide how the pointed-to word must resolve. */
+static const elf_reloc_t *reloc_at(elf_reader_t *reader, uint32_t addr) {
+    for (size_t r = 0; r < reader->reloc_count; r++) {
+        if (reader->relocs[r].r_offset == addr) {
+            return &reader->relocs[r];
+        }
+    }
+    return NULL;
+}
+
+static bool reloc_is_host_symbol(uint32_t type) {
+    return type == R_XTENSA_JMP_SLOT || type == R_XTENSA_GLOB_DAT;
 }
 
 int main(int argc, char **argv) {
@@ -140,26 +151,53 @@ int main(int argc, char **argv) {
     size_t host_ref_count = 0;
     for (size_t i = 0; i < n; i++) {
         uint32_t lit_addr = sites[i].imm; /* literal address from ISA decoding */
+        bool in_text = lit_addr >= text->addr &&
+                       lit_addr + 4 <= text->addr + text->size;
 
-        /* We can only patch literals that live inside the overlay body (.text).
-         * Skip anything outside .text. */
-        if (lit_addr < text->addr || lit_addr + 4 > text->addr + text->size) {
+        /* A JMP_SLOT / GLOB_DAT reloc at the literal address marks a reference
+         * whose target is a named host symbol resolved at load time */
+        const elf_reloc_t *rel = reloc_at(&reader, lit_addr);
+        const char *host_symbol = NULL;
+        if (rel && reloc_is_host_symbol(rel->r_info & 0xff) &&
+            rel->symbol && rel->symbol[0]) {
+            host_symbol = rel->symbol;
+        }
+
+        /* A literal that holds the address of one of this image's own functions is a 
+         * stub target; the runtime rewrites it to point at the generated stub. */
+        bool is_func_pointer = false;
+        if (in_text) {
+            uint32_t word = read_word_at(&reader, lit_addr);
+            for (size_t si = 0; si < reader.symbol_count; si++) {
+                elf_symbol_t *sym = &reader.symbols[si];
+                if (!sym->name || sym->size == 0) continue;
+                if (sym->shndx >= reader.section_count) continue;
+                elf_section_t *ss = &reader.sections[sym->shndx];
+                if (ss->addr != text->addr || strcmp(ss->name, text->name) != 0)
+                    continue;
+                if (sym->value == word) { is_func_pointer = true; break; }
+            }
+        }
+
+        /* Refuse to emit a broken blob. */
+        if (!in_text && (host_symbol || is_func_pointer)) {
+            fprintf(stderr,
+                    "error: literal at 0x%x requires resolution (%s) but lies "
+                    "outside .text [0x%x, 0x%x); the in-place patcher cannot "
+                    "reach it\n",
+                    lit_addr,
+                    host_symbol ? host_symbol : "function pointer",
+                    text->addr, text->addr + text->size);
+            free(strtab); free(host_refs); free(patches); free(overlay_data);
+            elf_reader_close(&reader);
+            free(data);
+            return 2;
+        }
+
+        if (!in_text) {
             continue;
         }
         uint16_t blob_offset = (uint16_t)(lit_addr - text->addr);
-
-        /* A JMP_SLOT reloc at the literal address marks an external symbol
-         * reference; the literal's section bytes are zero and the real target
-         * is the named host symbol resolved at load time. */
-        const char *host_symbol = NULL;
-        for (size_t r = 0; r < reader.reloc_count; r++) {
-            if (reader.relocs[r].r_offset == lit_addr &&
-                (reader.relocs[r].r_info & 0xff) == R_XTENSA_JMP_SLOT &&
-                reader.relocs[r].symbol && reader.relocs[r].symbol[0]) {
-                host_symbol = reader.relocs[r].symbol;
-                break;
-            }
-        }
 
         if (host_symbol) {
             size_t name_off = strtab_size;

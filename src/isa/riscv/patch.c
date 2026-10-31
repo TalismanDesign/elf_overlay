@@ -85,11 +85,11 @@ static size_t riscv_get_insn_len(void) {
 }
 
 static size_t riscv_get_stub_stride(void) {
-    return 32;
+    return ELF_OVERLAY_RISCV_STUB_STRIDE;
 }
 
 static size_t riscv_get_stub_alignment(void) {
-    return 4;
+    return ELF_OVERLAY_STUB_ALIGNMENT;
 }
 
 static const elf_overlay_isa_ops_t riscv_ops = {
@@ -98,7 +98,6 @@ static const elf_overlay_isa_ops_t riscv_ops = {
     .find_patch_sites = riscv_find_patch_sites,
     .encode_patch = riscv_encode_patch,
     .is_patch_valid = riscv_is_patch_valid,
-    .generate_stub = NULL,
     .get_insn_len = riscv_get_insn_len,
     .get_stub_stride = riscv_get_stub_stride,
     .get_stub_alignment = riscv_get_stub_alignment
