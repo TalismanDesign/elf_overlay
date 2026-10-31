@@ -13,10 +13,10 @@ struct elf_overlay_frame {
     uint8_t *base;
     int overlay_id;
     uint32_t body_offset;
-    uint32_t body_len;   /* overlay body length in bytes; bounds-check key */
+    uint32_t body_len; /* overlay body length in bytes; bounds-check key */
     uint32_t last_use;
     int occupied;
-    int refcount;    /* enter/leave reference count; 0 = evictable */
+    int refcount; /* enter/leave reference count; 0 = evictable */
 };
 
 struct elf_overlay_loader {
@@ -24,10 +24,10 @@ struct elf_overlay_loader {
     elf_overlay_header_t hdr;
     void *stub_block;
     size_t stub_block_size;
-    
+
     elf_overlay_section_map_t section_map;
     int section_map_set;
-    
+
     elf_overlay_entry_t *overlays;
     uint16_t overlay_count;
     elf_overlay_stub_t *stubs;
@@ -42,7 +42,7 @@ struct elf_overlay_loader {
     uint16_t host_ref_count;
     char *strtab;
     elf_overlay_symbol_resolver_t symbol_resolver;
-    
+
     struct elf_overlay_frame frames[ELF_OVERLAY_MAX_FRAMES];
     size_t frame_count;
     size_t frame_size;
@@ -52,19 +52,21 @@ struct elf_overlay_loader {
 static struct elf_overlay_loader *g_active_loader = NULL;
 
 static int alloc_tables(struct elf_overlay_loader *l) {
-    l->overlays = l->overlay_count ? elf_overlay_alloc(l->overlay_count * sizeof(*l->overlays)) : NULL;
+    l->overlays =
+        l->overlay_count ? elf_overlay_alloc(l->overlay_count * sizeof(*l->overlays)) : NULL;
     l->stubs = l->stub_count ? elf_overlay_alloc(l->stub_count * sizeof(*l->stubs)) : NULL;
-    l->redirects = l->redirect_count ? elf_overlay_alloc(l->redirect_count * sizeof(*l->redirects)) : NULL;
+    l->redirects =
+        l->redirect_count ? elf_overlay_alloc(l->redirect_count * sizeof(*l->redirects)) : NULL;
     l->patches = l->patch_count ? elf_overlay_alloc(l->patch_count * sizeof(*l->patches)) : NULL;
-    l->stub_patches = l->stub_patch_count ? elf_overlay_alloc(l->stub_patch_count * sizeof(*l->stub_patches)) : NULL;
-    l->host_refs = l->host_ref_count ? elf_overlay_alloc(l->host_ref_count * sizeof(*l->host_refs)) : NULL;
-    
-    if ((l->overlay_count && !l->overlays) ||
-        (l->stub_count && !l->stubs) ||
-        (l->redirect_count && !l->redirects) ||
-        (l->patch_count && !l->patches) ||
-        (l->stub_patch_count && !l->stub_patches) ||
-        (l->host_ref_count && !l->host_refs)) {
+    l->stub_patches = l->stub_patch_count
+                          ? elf_overlay_alloc(l->stub_patch_count * sizeof(*l->stub_patches))
+                          : NULL;
+    l->host_refs =
+        l->host_ref_count ? elf_overlay_alloc(l->host_ref_count * sizeof(*l->host_refs)) : NULL;
+
+    if ((l->overlay_count && !l->overlays) || (l->stub_count && !l->stubs) ||
+        (l->redirect_count && !l->redirects) || (l->patch_count && !l->patches) ||
+        (l->stub_patch_count && !l->stub_patches) || (l->host_ref_count && !l->host_refs)) {
         return ELF_OVERLAY_ERR_MEM;
     }
     return ELF_OVERLAY_OK;
@@ -114,43 +116,42 @@ static int find_overlay(struct elf_overlay_loader *l, uint16_t id) {
 void *elf_overlay_enter(uint32_t key) {
     struct elf_overlay_loader *l = g_active_loader;
     if (!l) return NULL;
-    
+
     uint16_t overlay_id = (key >> 16) & 0xFFFF;
-    
+
     int slot = find_resident(l, overlay_id);
     if (slot < 0) {
         int oidx = find_overlay(l, overlay_id);
         if (oidx < 0) return NULL;
         elf_overlay_entry_t *ov = &l->overlays[oidx];
-        
+
         size_t read_off = ov->offset;
         size_t ov_len = ov->length;
         /* The frame must hold the body plus the up-to-3-byte zero pad that the
          * word-store exec copy writes for a non-word-multiple length. */
         if (ov_len + ELF_OVERLAY_ALIGN > l->frame_size) {
-            elf_overlay_log_error(TAG, "overlay %u too large: %u > frame %u",
-                                  overlay_id, (unsigned)ov_len,
-                                  (unsigned)l->frame_size);
+            elf_overlay_log_error(TAG, "overlay %u too large: %u > frame %u", overlay_id,
+                                  (unsigned)ov_len, (unsigned)l->frame_size);
             return NULL;
         }
-        
+
         uint8_t *staging = elf_overlay_alloc_rw(ov_len);
         if (!staging) return NULL;
         if (read_at(l, read_off, staging, ov_len) != 0) {
             elf_overlay_free(staging);
             return NULL;
         }
-        
+
         slot = pick_victim(l);
         if (slot < 0) {
             elf_overlay_free(staging);
             return NULL;
         }
         uint32_t body_base = (uint32_t)(uintptr_t)l->frames[slot].base;
-        
+
         const elf_overlay_isa_ops_t *isa = elf_overlay_isa_get(l->hdr.isa);
         size_t insn_len = isa ? isa->get_insn_len() : 4;
-        
+
         for (uint16_t i = 0; i < l->patch_count; i++) {
             if (l->patches[i].overlay_id == overlay_id) {
                 uint16_t boff = l->patches[i].blob_offset;
@@ -164,9 +165,8 @@ void *elf_overlay_enter(uint32_t key) {
                         if (isa && isa->encode_patch) {
                             uint32_t pc_runtime = body_base + insn_off;
                             uint32_t literal_addr = body_base + boff;
-                            isa->encode_patch(staging + insn_off, insn_len,
-                                              pc_runtime, literal_addr,
-                                              &(elf_overlay_patch_site_t){ .reg = 0 });
+                            isa->encode_patch(staging + insn_off, insn_len, pc_runtime,
+                                              literal_addr, &(elf_overlay_patch_site_t){.reg = 0});
                         }
                     }
                 }
@@ -183,9 +183,8 @@ void *elf_overlay_enter(uint32_t key) {
                     if (isa && isa->encode_patch) {
                         uint32_t pc_runtime = body_base + insn_off;
                         uint32_t literal_addr = body_base + boff;
-                        isa->encode_patch(staging + insn_off, insn_len,
-                                          pc_runtime, literal_addr,
-                                          &(elf_overlay_patch_site_t){ .reg = 0 });
+                        isa->encode_patch(staging + insn_off, insn_len, pc_runtime, literal_addr,
+                                          &(elf_overlay_patch_site_t){.reg = 0});
                     }
                 }
             }
@@ -206,9 +205,8 @@ void *elf_overlay_enter(uint32_t key) {
                  * moment the overlay code runs, with no diagnostic. Fail loud
                  * instead. */
                 if (sym == 0) {
-                    elf_overlay_log_error(TAG,
-                        "overlay %u: unresolved host symbol '%s'",
-                        overlay_id, name);
+                    elf_overlay_log_error(TAG, "overlay %u: unresolved host symbol '%s'",
+                                          overlay_id, name);
                     host_ref_failed = 1;
                     break;
                 }
@@ -218,9 +216,8 @@ void *elf_overlay_enter(uint32_t key) {
                     if (isa && isa->encode_patch) {
                         uint32_t pc_runtime = body_base + insn_off;
                         uint32_t literal_addr = body_base + boff;
-                        isa->encode_patch(staging + insn_off, insn_len,
-                                          pc_runtime, literal_addr,
-                                          &(elf_overlay_patch_site_t){ .reg = 0 });
+                        isa->encode_patch(staging + insn_off, insn_len, pc_runtime, literal_addr,
+                                          &(elf_overlay_patch_site_t){.reg = 0});
                     }
                 }
             }
@@ -229,11 +226,11 @@ void *elf_overlay_enter(uint32_t key) {
             elf_overlay_free(staging);
             return NULL;
         }
-        
+
         elf_overlay_copy_exec(l->frames[slot].base, staging, ov_len);
         elf_overlay_sync_exec(l->frames[slot].base, ov_len);
         elf_overlay_free(staging);
-        
+
         l->frames[slot].overlay_id = overlay_id;
         l->frames[slot].occupied = 1;
         l->frames[slot].body_offset = 0;
@@ -243,12 +240,11 @@ void *elf_overlay_enter(uint32_t key) {
     } else {
         l->frames[slot].refcount++;
     }
-    
+
     l->frames[slot].last_use = ++l->clock;
     uint32_t body_off = key & 0xFFFF;
     if (body_off >= l->frames[slot].body_len) {
-        elf_overlay_log_error(TAG, "bad body off ov=%u off=0x%x len=0x%x",
-                              overlay_id, body_off,
+        elf_overlay_log_error(TAG, "bad body off ov=%u off=0x%x len=0x%x", overlay_id, body_off,
                               (unsigned)l->frames[slot].body_len);
         return NULL;
     }
@@ -258,9 +254,9 @@ void *elf_overlay_enter(uint32_t key) {
 void elf_overlay_leave(uint32_t key) {
     struct elf_overlay_loader *l = g_active_loader;
     if (!l) return;
-    
+
     uint16_t overlay_id = (key >> 16) & 0xFFFF;
-    
+
     for (size_t i = 0; i < l->frame_count; i++) {
         if (l->frames[i].occupied && l->frames[i].overlay_id == overlay_id) {
             if (l->frames[i].refcount > 0) {
@@ -276,46 +272,46 @@ void elf_overlay_leave(uint32_t key) {
 int elf_overlay_load(elf_overlay_loader_t **out, const char *path) {
     if (!out || !path) return ELF_OVERLAY_ERR_FORMAT;
     *out = NULL;
-    
+
     elf_overlay_log_info(TAG, "load %s", path);
-    
+
     struct elf_overlay_loader *l = elf_overlay_alloc(sizeof(*l));
     if (!l) return ELF_OVERLAY_ERR_MEM;
     memset(l, 0, sizeof(*l));
-    
+
     l->file = elf_overlay_file_open(path);
     if (!l->file) {
         elf_overlay_free(l);
         return ELF_OVERLAY_ERR_IO;
     }
-    
+
     if (read_at(l, 0, &l->hdr, sizeof(l->hdr)) != 0) {
         elf_overlay_file_close(l->file);
         elf_overlay_free(l);
         return ELF_OVERLAY_ERR_IO;
     }
-    
-    if (memcmp(l->hdr.magic, ELF_OVERLAY_MAGIC, 4) != 0 ||
-        l->hdr.version != ELF_OVERLAY_VERSION) {
+
+    if (memcmp(l->hdr.magic, ELF_OVERLAY_MAGIC, 4) != 0 || l->hdr.version != ELF_OVERLAY_VERSION) {
         elf_overlay_file_close(l->file);
         elf_overlay_free(l);
         return ELF_OVERLAY_ERR_FORMAT;
     }
-    
+
     l->overlay_count = l->hdr.overlays;
     l->stub_count = l->hdr.stubs;
     l->redirect_count = l->hdr.redirects;
     l->patch_count = l->hdr.patches;
     l->stub_patch_count = l->hdr.stub_patches;
     l->host_ref_count = l->hdr.host_refs;
-    
+
     if (alloc_tables(l) != ELF_OVERLAY_OK) {
         elf_overlay_unload(l);
         return ELF_OVERLAY_ERR_MEM;
     }
-    
+
     size_t off = sizeof(l->hdr);
-    if (elf_overlay_file_read(l->file, off, l->overlays, l->overlay_count * sizeof(*l->overlays)) != 0) {
+    if (elf_overlay_file_read(l->file, off, l->overlays, l->overlay_count * sizeof(*l->overlays)) !=
+        0) {
         elf_overlay_unload(l);
         return ELF_OVERLAY_ERR_IO;
     }
@@ -325,45 +321,61 @@ int elf_overlay_load(elf_overlay_loader_t **out, const char *path) {
         return ELF_OVERLAY_ERR_IO;
     }
     off += l->stub_count * sizeof(*l->stubs);
-    if (elf_overlay_file_read(l->file, off, l->redirects, l->redirect_count * sizeof(*l->redirects)) != 0) {
+    if (elf_overlay_file_read(l->file, off, l->redirects,
+                              l->redirect_count * sizeof(*l->redirects)) != 0) {
         elf_overlay_unload(l);
         return ELF_OVERLAY_ERR_IO;
     }
     off += l->redirect_count * sizeof(*l->redirects);
-    if (elf_overlay_file_read(l->file, off, l->patches, l->patch_count * sizeof(*l->patches)) != 0) {
+    if (elf_overlay_file_read(l->file, off, l->patches, l->patch_count * sizeof(*l->patches)) !=
+        0) {
         elf_overlay_unload(l);
         return ELF_OVERLAY_ERR_IO;
     }
     off += l->patch_count * sizeof(*l->patches);
-    if (elf_overlay_file_read(l->file, off, l->stub_patches, l->stub_patch_count * sizeof(*l->stub_patches)) != 0) {
+    if (elf_overlay_file_read(l->file, off, l->stub_patches,
+                              l->stub_patch_count * sizeof(*l->stub_patches)) != 0) {
         elf_overlay_unload(l);
         return ELF_OVERLAY_ERR_IO;
     }
     off += l->stub_patch_count * sizeof(*l->stub_patches);
-    if (elf_overlay_file_read(l->file, off, l->host_refs, l->host_ref_count * sizeof(*l->host_refs)) != 0) {
+    if (elf_overlay_file_read(l->file, off, l->host_refs,
+                              l->host_ref_count * sizeof(*l->host_refs)) != 0) {
         elf_overlay_unload(l);
         return ELF_OVERLAY_ERR_IO;
     }
     off += l->host_ref_count * sizeof(*l->host_refs);
-    
+
     if (l->hdr.strtab_size > 0 && l->hdr.strtab_off == off) {
         l->strtab = elf_overlay_alloc(l->hdr.strtab_size);
-        if (!l->strtab) { elf_overlay_unload(l); return ELF_OVERLAY_ERR_MEM; }
+        if (!l->strtab) {
+            elf_overlay_unload(l);
+            return ELF_OVERLAY_ERR_MEM;
+        }
         if (elf_overlay_file_read(l->file, off, l->strtab, l->hdr.strtab_size) != 0) {
-            elf_overlay_unload(l); return ELF_OVERLAY_ERR_IO;
+            elf_overlay_unload(l);
+            return ELF_OVERLAY_ERR_IO;
         }
         off += l->hdr.strtab_size;
     }
-    
+
     l->stub_block_size = l->hdr.stub_block_size;
     if (l->stub_block_size > 0) {
         l->stub_block = elf_overlay_alloc_exec(l->stub_block_size);
-        if (!l->stub_block) { elf_overlay_unload(l); return ELF_OVERLAY_ERR_MEM; }
+        if (!l->stub_block) {
+            elf_overlay_unload(l);
+            return ELF_OVERLAY_ERR_MEM;
+        }
         uint8_t *stub_staging = elf_overlay_alloc_rw(l->stub_block_size);
-        if (!stub_staging) { elf_overlay_unload(l); return ELF_OVERLAY_ERR_MEM; }
-        if (elf_overlay_file_read(l->file, l->hdr.stub_block_off, stub_staging, l->stub_block_size) != 0) {
+        if (!stub_staging) {
+            elf_overlay_unload(l);
+            return ELF_OVERLAY_ERR_MEM;
+        }
+        if (elf_overlay_file_read(l->file, l->hdr.stub_block_off, stub_staging,
+                                  l->stub_block_size) != 0) {
             elf_overlay_free(stub_staging);
-            elf_overlay_unload(l); return ELF_OVERLAY_ERR_IO;
+            elf_overlay_unload(l);
+            return ELF_OVERLAY_ERR_IO;
         }
         /* Wire enter/leave slots in the staging copy before it reaches IRAM. */
         if (l->hdr.slot_enter + 4 <= l->stub_block_size) {
@@ -378,7 +390,7 @@ int elf_overlay_load(elf_overlay_loader_t **out, const char *path) {
         elf_overlay_sync_exec(l->stub_block, l->stub_block_size);
         elf_overlay_free(stub_staging);
     }
-    
+
     l->frame_count = ELF_OVERLAY_MAX_FRAMES;
     l->frame_size = ELF_OVERLAY_DEFAULT_FRAME_SIZE;
     for (size_t i = 0; i < l->frame_count; i++) {
@@ -398,14 +410,14 @@ int elf_overlay_load(elf_overlay_loader_t **out, const char *path) {
         return ELF_OVERLAY_ERR_MEM;
     }
     l->clock = 0;
-    
+
     *out = (elf_overlay_loader_t *)l;
     return ELF_OVERLAY_OK;
 }
 
-int elf_overlay_load_from_memory(elf_overlay_loader_t **out,
-                                  const void *data, size_t size) {
-    (void)data; (void)size;
+int elf_overlay_load_from_memory(elf_overlay_loader_t **out, const void *data, size_t size) {
+    (void)data;
+    (void)size;
     if (!out) return ELF_OVERLAY_ERR_FORMAT;
     *out = NULL;
     return ELF_OVERLAY_ERR_UNSUPPORTED;
@@ -430,7 +442,7 @@ void elf_overlay_unload(elf_overlay_loader_t *loader) {
 }
 
 int elf_overlay_set_section_map(elf_overlay_loader_t *loader,
-                                 const elf_overlay_section_map_t *map) {
+                                const elf_overlay_section_map_t *map) {
     if (!loader || !map) return ELF_OVERLAY_ERR_RANGE;
     struct elf_overlay_loader *l = (struct elf_overlay_loader *)loader;
     l->section_map = *map;
@@ -439,15 +451,15 @@ int elf_overlay_set_section_map(elf_overlay_loader_t *loader,
 }
 
 int elf_overlay_set_symbol_resolver(elf_overlay_loader_t *loader,
-                                     elf_overlay_symbol_resolver_t resolver) {
+                                    elf_overlay_symbol_resolver_t resolver) {
     if (!loader) return ELF_OVERLAY_ERR_RANGE;
     struct elf_overlay_loader *l = (struct elf_overlay_loader *)loader;
     l->symbol_resolver = resolver;
     return ELF_OVERLAY_OK;
 }
 
-int elf_overlay_resolve(const elf_overlay_loader_t *loader,
-                        uint32_t canonical, uint32_t *resident) {
+int elf_overlay_resolve(const elf_overlay_loader_t *loader, uint32_t canonical,
+                        uint32_t *resident) {
     if (!loader || !resident) return ELF_OVERLAY_ERR_RANGE;
     const struct elf_overlay_loader *l = (const struct elf_overlay_loader *)loader;
     if (!l->section_map_set) return ELF_OVERLAY_ERR_RANGE;
@@ -467,7 +479,7 @@ int elf_overlay_apply_redirects(elf_overlay_loader_t *loader) {
     struct elf_overlay_loader *l = (struct elf_overlay_loader *)loader;
     if (!l->stub_block) return ELF_OVERLAY_ERR_FORMAT;
     if (!l->section_map_set) return ELF_OVERLAY_ERR_FORMAT;
-    
+
     for (uint16_t i = 0; i < l->redirect_count; i++) {
         uint32_t site = l->redirects[i].site;
         uint32_t val = (uint32_t)(uintptr_t)l->stub_block + l->redirects[i].stub;
@@ -485,8 +497,7 @@ void *elf_overlay_get_stub_block(elf_overlay_loader_t *loader) {
     return l->stub_block;
 }
 
-int elf_overlay_find_stub(elf_overlay_loader_t *loader,
-                          uint32_t canonical, uint32_t *stub_off) {
+int elf_overlay_find_stub(elf_overlay_loader_t *loader, uint32_t canonical, uint32_t *stub_off) {
     if (!loader || !stub_off) return ELF_OVERLAY_ERR_RANGE;
     struct elf_overlay_loader *l = (struct elf_overlay_loader *)loader;
     for (uint16_t i = 0; i < l->stub_count; i++) {

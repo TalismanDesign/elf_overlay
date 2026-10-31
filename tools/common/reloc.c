@@ -38,33 +38,39 @@
 
 static const char *reloc_type_name(uint32_t type) {
     switch (type) {
-        case R_XTENSA_NONE: return "R_XTENSA_NONE";
-        case R_XTENSA_32: return "R_XTENSA_32";
-        case R_XTENSA_RELATIVE: return "R_XTENSA_RELATIVE";
-        case R_XTENSA_JMP_SLOT: return "R_XTENSA_JMP_SLOT";
-        case R_XTENSA_CALL16: return "R_XTENSA_CALL16";
-        default: return "R_XTENSA_UNKNOWN";
+        case R_XTENSA_NONE:
+            return "R_XTENSA_NONE";
+        case R_XTENSA_32:
+            return "R_XTENSA_32";
+        case R_XTENSA_RELATIVE:
+            return "R_XTENSA_RELATIVE";
+        case R_XTENSA_JMP_SLOT:
+            return "R_XTENSA_JMP_SLOT";
+        case R_XTENSA_CALL16:
+            return "R_XTENSA_CALL16";
+        default:
+            return "R_XTENSA_UNKNOWN";
     }
 }
 
 int parse_relocations(elf_reader_t *reader, relocation_t **out, size_t *count) {
     if (!reader || !out || !count) return -1;
-    
+
     size_t total = reader->reloc_count;
     if (total == 0) {
         *out = NULL;
         *count = 0;
         return 0;
     }
-    
+
     relocation_t *rels = calloc(total, sizeof(relocation_t));
     if (!rels) return -1;
-    
+
     for (size_t i = 0; i < total; i++) {
         uint32_t info = reader->relocs[i].r_info;
         rels[i].offset = reader->relocs[i].r_offset;
         rels[i].type = reloc_type_name(ELF32_R_TYPE(info));
-        
+
         /* Look up symbol name from symtab using symbol index in r_info */
         uint32_t sym_idx = ELF32_R_SYM(info);
         if (reader->symbol_count > 0 && sym_idx < reader->symbol_count &&
@@ -74,7 +80,7 @@ int parse_relocations(elf_reader_t *reader, relocation_t **out, size_t *count) {
             rels[i].symbol = NULL;
         }
     }
-    
+
     *out = rels;
     *count = total;
     return 0;

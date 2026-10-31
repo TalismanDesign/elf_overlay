@@ -8,8 +8,7 @@
 extern "C" {
 #endif
 
-int elf_overlay_blob_validate(const void *data, size_t size, 
-                               elf_overlay_header_t *header);
+int elf_overlay_blob_validate(const void *data, size_t size, elf_overlay_header_t *header);
 
 #ifdef __cplusplus
 }

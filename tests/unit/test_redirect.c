@@ -56,13 +56,9 @@ int main(void) {
     m.redirect_count = 1;
 
     /* Serialize to ELFO blob */
-    size_t strtab_off = sizeof(elf_overlay_header_t)
-        + 12 * m.overlay_count
-        + 12 * m.stub_count
-        + 8 * m.redirect_count
-        + 8 * m.patch_count
-        + 8 * m.stub_patch_count
-        + 12 * m.host_ref_count;
+    size_t strtab_off = sizeof(elf_overlay_header_t) + 12 * m.overlay_count + 12 * m.stub_count +
+                        8 * m.redirect_count + 8 * m.patch_count + 8 * m.stub_patch_count +
+                        12 * m.host_ref_count;
     size_t strtab_size = m.strtab_size;
     size_t stub_block_off = (strtab_off + strtab_size + 3) & ~3;
     size_t total = stub_block_off + m.stub_block_size + m.overlay_data_size;

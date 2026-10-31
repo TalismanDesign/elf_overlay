@@ -27,9 +27,9 @@ typedef struct {
 typedef struct {
     char *func;
     uint32_t address;
-    char *via;          /* "direct" or "indirect" */
-    uint32_t target;    /* address for direct calls */
-    char *symbol;       /* symbol name for indirect/host calls */
+    char *via;       /* "direct" or "indirect" */
+    uint32_t target; /* address for direct calls */
+    char *symbol;    /* symbol name for indirect/host calls */
 } analysis_call_t;
 
 typedef struct {

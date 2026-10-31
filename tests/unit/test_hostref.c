@@ -69,13 +69,9 @@ static void build_hostref_blob(const char *path) {
     m.host_refs[0].name_off = 1; /* name starts after the leading NUL */
     m.host_ref_count = 1;
 
-    size_t strtab_off = sizeof(elf_overlay_header_t)
-        + 12 * m.overlay_count
-        + 12 * m.stub_count
-        + 8 * m.redirect_count
-        + 8 * m.patch_count
-        + 8 * m.stub_patch_count
-        + 12 * m.host_ref_count;
+    size_t strtab_off = sizeof(elf_overlay_header_t) + 12 * m.overlay_count + 12 * m.stub_count +
+                        8 * m.redirect_count + 8 * m.patch_count + 8 * m.stub_patch_count +
+                        12 * m.host_ref_count;
     size_t stub_block_off = (strtab_off + m.strtab_size + 3) & ~(size_t)3;
     size_t total = stub_block_off + m.stub_block_size + m.overlay_data_size;
 

@@ -92,8 +92,8 @@ static int build_xtensa_stub_block(pack_manifest_t *m) {
     snprintf(cmd, sizeof(cmd), "%s -o %s %s", as_path, obj_path, asm_path);
     if (system(cmd) != 0) return -1;
 
-    snprintf(cmd, sizeof(cmd), "%s -O binary --only-section=.overlay.stubblock %s %s",
-             objcopy_path, obj_path, bin_path);
+    snprintf(cmd, sizeof(cmd), "%s -O binary --only-section=.overlay.stubblock %s %s", objcopy_path,
+             obj_path, bin_path);
     if (system(cmd) != 0) return -1;
 
     FILE *bin = fopen(bin_path, "rb");
@@ -101,10 +101,16 @@ static int build_xtensa_stub_block(pack_manifest_t *m) {
     fseek(bin, 0, SEEK_END);
     long len = ftell(bin);
     fseek(bin, 0, SEEK_SET);
-    if (len <= 0) { fclose(bin); return -1; }
+    if (len <= 0) {
+        fclose(bin);
+        return -1;
+    }
 
     uint8_t *block = malloc((size_t)len);
-    if (!block) { fclose(bin); return -1; }
+    if (!block) {
+        fclose(bin);
+        return -1;
+    }
     if (fread(block, 1, (size_t)len, bin) != (size_t)len) {
         fclose(bin);
         free(block);
@@ -136,7 +142,10 @@ int main(int argc, char **argv) {
     long fsize = ftell(fp);
     fseek(fp, 0, SEEK_SET);
     uint8_t *data = malloc(fsize);
-    if (!data) { fclose(fp); return 2; }
+    if (!data) {
+        fclose(fp);
+        return 2;
+    }
     fread(data, 1, fsize, fp);
     fclose(fp);
 
@@ -156,13 +165,9 @@ int main(int argc, char **argv) {
     }
 
     /* Compute required ELFO buffer size */
-    size_t strtab_off = sizeof(elf_overlay_header_t)
-        + 12 * m.overlay_count
-        + 12 * m.stub_count
-        + 8 * m.redirect_count
-        + 8 * m.patch_count
-        + 8 * m.stub_patch_count
-        + 12 * m.host_ref_count;
+    size_t strtab_off = sizeof(elf_overlay_header_t) + 12 * m.overlay_count + 12 * m.stub_count +
+                        8 * m.redirect_count + 8 * m.patch_count + 8 * m.stub_patch_count +
+                        12 * m.host_ref_count;
     size_t strtab_size = m.strtab_size;
     size_t stub_block_off = (strtab_off + strtab_size + 3) & ~3;
     size_t total = stub_block_off + m.stub_block_size + m.overlay_data_size;

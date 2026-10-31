@@ -28,8 +28,7 @@ void elf_overlay_riscv_init(void);
  * Returns 0 if the address is not in any loaded section. */
 static uint32_t read_word_at(elf_reader_t *reader, uint32_t addr) {
     elf_section_t *sec = elf_section_by_addr(reader, addr);
-    if (!sec || !sec->data || addr < sec->addr ||
-        addr + 4 > sec->addr + sec->size) {
+    if (!sec || !sec->data || addr < sec->addr || addr + 4 > sec->addr + sec->size) {
         return 0;
     }
     size_t off = addr - sec->addr;
@@ -72,7 +71,10 @@ int main(int argc, char **argv) {
     long fsize = ftell(fp);
     fseek(fp, 0, SEEK_SET);
     uint8_t *data = malloc(fsize);
-    if (!data) { fclose(fp); return 2; }
+    if (!data) {
+        fclose(fp);
+        return 2;
+    }
     fread(data, 1, fsize, fp);
     fclose(fp);
 
@@ -95,8 +97,10 @@ int main(int argc, char **argv) {
 
     /* Determine ISA from machine field */
     uint16_t isa = ELF_OVERLAY_ISA_XTENSA;
-    if (reader.machine == EM_RISCV) isa = ELF_OVERLAY_ISA_RISCV;
-    else if (reader.machine == EM_ARM) isa = ELF_OVERLAY_ISA_ARM;
+    if (reader.machine == EM_RISCV)
+        isa = ELF_OVERLAY_ISA_RISCV;
+    else if (reader.machine == EM_ARM)
+        isa = ELF_OVERLAY_ISA_ARM;
 
     const elf_overlay_isa_ops_t *isa_ops = elf_overlay_isa_get(isa);
     if (!isa_ops) {
@@ -125,8 +129,8 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    printf("machine=%u isa=%u .text=0x%x+%zu patch_sites=%zu\n",
-           reader.machine, isa, (unsigned int)text->addr, (size_t)text->size, n);
+    printf("machine=%u isa=%u .text=0x%x+%zu patch_sites=%zu\n", reader.machine, isa,
+           (unsigned int)text->addr, (size_t)text->size, n);
 
     size_t overlay_data_size = text->size;
 
@@ -140,30 +144,46 @@ int main(int argc, char **argv) {
 
     /* Build patches/host refs: one per patch site */
     pack_patch_t *patches = calloc(n ? n : 1, sizeof(pack_patch_t));
-    if (!patches) { free(overlay_data); elf_reader_close(&reader); free(data); return 2; }
+    if (!patches) {
+        free(overlay_data);
+        elf_reader_close(&reader);
+        free(data);
+        return 2;
+    }
     pack_hostref_t *host_refs = calloc(n ? n : 1, sizeof(pack_hostref_t));
-    if (!host_refs) { free(patches); free(overlay_data); elf_reader_close(&reader); free(data); return 2; }
+    if (!host_refs) {
+        free(patches);
+        free(overlay_data);
+        elf_reader_close(&reader);
+        free(data);
+        return 2;
+    }
     char *strtab = calloc(1, 1);
     size_t strtab_size = 1;
-    if (!strtab) { free(host_refs); free(patches); free(overlay_data); elf_reader_close(&reader); free(data); return 2; }
+    if (!strtab) {
+        free(host_refs);
+        free(patches);
+        free(overlay_data);
+        elf_reader_close(&reader);
+        free(data);
+        return 2;
+    }
 
     size_t patch_count = 0;
     size_t host_ref_count = 0;
     for (size_t i = 0; i < n; i++) {
         uint32_t lit_addr = sites[i].imm; /* literal address from ISA decoding */
-        bool in_text = lit_addr >= text->addr &&
-                       lit_addr + 4 <= text->addr + text->size;
+        bool in_text = lit_addr >= text->addr && lit_addr + 4 <= text->addr + text->size;
 
         /* A JMP_SLOT / GLOB_DAT reloc at the literal address marks a reference
          * whose target is a named host symbol resolved at load time */
         const elf_reloc_t *rel = reloc_at(&reader, lit_addr);
         const char *host_symbol = NULL;
-        if (rel && reloc_is_host_symbol(rel->r_info & 0xff) &&
-            rel->symbol && rel->symbol[0]) {
+        if (rel && reloc_is_host_symbol(rel->r_info & 0xff) && rel->symbol && rel->symbol[0]) {
             host_symbol = rel->symbol;
         }
 
-        /* A literal that holds the address of one of this image's own functions is a 
+        /* A literal that holds the address of one of this image's own functions is a
          * stub target; the runtime rewrites it to point at the generated stub. */
         bool is_func_pointer = false;
         if (in_text) {
@@ -173,9 +193,11 @@ int main(int argc, char **argv) {
                 if (!sym->name || sym->size == 0) continue;
                 if (sym->shndx >= reader.section_count) continue;
                 elf_section_t *ss = &reader.sections[sym->shndx];
-                if (ss->addr != text->addr || strcmp(ss->name, text->name) != 0)
-                    continue;
-                if (sym->value == word) { is_func_pointer = true; break; }
+                if (ss->addr != text->addr || strcmp(ss->name, text->name) != 0) continue;
+                if (sym->value == word) {
+                    is_func_pointer = true;
+                    break;
+                }
             }
         }
 
@@ -185,10 +207,12 @@ int main(int argc, char **argv) {
                     "error: literal at 0x%x requires resolution (%s) but lies "
                     "outside .text [0x%x, 0x%x); the in-place patcher cannot "
                     "reach it\n",
-                    lit_addr,
-                    host_symbol ? host_symbol : "function pointer",
-                    text->addr, text->addr + text->size);
-            free(strtab); free(host_refs); free(patches); free(overlay_data);
+                    lit_addr, host_symbol ? host_symbol : "function pointer", text->addr,
+                    text->addr + text->size);
+            free(strtab);
+            free(host_refs);
+            free(patches);
+            free(overlay_data);
             elf_reader_close(&reader);
             free(data);
             return 2;
@@ -204,7 +228,10 @@ int main(int argc, char **argv) {
             size_t name_len = strlen(host_symbol) + 1;
             char *next = realloc(strtab, strtab_size + name_len);
             if (!next) {
-                free(strtab); free(host_refs); free(patches); free(overlay_data);
+                free(strtab);
+                free(host_refs);
+                free(patches);
+                free(overlay_data);
                 elf_reader_close(&reader);
                 free(data);
                 return 2;
@@ -234,7 +261,10 @@ int main(int argc, char **argv) {
     if (redirect_cap > 0) {
         redirects = calloc(redirect_cap, sizeof(pack_redirect_t));
         if (!redirects) {
-            free(host_refs); free(strtab); free(patches); free(overlay_data);
+            free(host_refs);
+            free(strtab);
+            free(patches);
+            free(overlay_data);
             elf_reader_close(&reader);
             free(data);
             return 2;
@@ -276,8 +306,13 @@ int main(int argc, char **argv) {
     }
     if (func_count == 0) {
         fprintf(stderr, "no functions in .text\n");
-        free(host_refs); free(strtab); free(patches); free(redirects); free(overlay_data);
-        free(m.stub_block); free(m.overlays);
+        free(host_refs);
+        free(strtab);
+        free(patches);
+        free(redirects);
+        free(overlay_data);
+        free(m.stub_block);
+        free(m.overlays);
         elf_reader_close(&reader);
         free(data);
         return 2;
@@ -285,8 +320,13 @@ int main(int argc, char **argv) {
 
     m.stubs = calloc(func_count, sizeof(pack_stub_t));
     if (!m.stubs) {
-        free(host_refs); free(strtab); free(patches); free(redirects); free(overlay_data);
-        free(m.stub_block); free(m.overlays);
+        free(host_refs);
+        free(strtab);
+        free(patches);
+        free(redirects);
+        free(overlay_data);
+        free(m.stub_block);
+        free(m.overlays);
         elf_reader_close(&reader);
         free(data);
         return 2;
@@ -302,20 +342,23 @@ int main(int argc, char **argv) {
         m.stubs[s].canonical = sym->value;
         m.stubs[s].overlay_id = 1;
         m.stubs[s].body_offset = (uint16_t)(sym->value - text->addr);
-        m.stubs[s].stub_off = STUB_SLOTS_SIZE +
-                              (uint32_t)(func_count * sizeof(uint32_t)) +
+        m.stubs[s].stub_off = STUB_SLOTS_SIZE + (uint32_t)(func_count * sizeof(uint32_t)) +
                               (uint32_t)(s * XTENSA_STUB_STRIDE);
         s++;
     }
     m.stub_count = func_count;
-    m.stub_block_size = STUB_SLOTS_SIZE +
-                        (func_count * sizeof(uint32_t)) +
-                        (func_count * XTENSA_STUB_STRIDE);
+    m.stub_block_size =
+        STUB_SLOTS_SIZE + (func_count * sizeof(uint32_t)) + (func_count * XTENSA_STUB_STRIDE);
     free(m.stub_block);
     m.stub_block = calloc(1, m.stub_block_size);
     if (!m.stub_block) {
-        free(host_refs); free(strtab); free(patches); free(redirects); free(overlay_data);
-        free(m.overlays); free(m.stubs);
+        free(host_refs);
+        free(strtab);
+        free(patches);
+        free(redirects);
+        free(overlay_data);
+        free(m.overlays);
+        free(m.stubs);
         elf_reader_close(&reader);
         free(data);
         return 2;
@@ -347,9 +390,16 @@ int main(int argc, char **argv) {
     pack_patch_t *regular_patches = calloc(patch_count ? patch_count : 1, sizeof(pack_patch_t));
     pack_patch_t *stub_patches = calloc(patch_count ? patch_count : 1, sizeof(pack_patch_t));
     if (!regular_patches || !stub_patches) {
-        free(host_refs); free(strtab); free(patches); free(redirects); free(overlay_data);
-        free(regular_patches); free(stub_patches);
-        free(m.stub_block); free(m.overlays); free(m.stubs);
+        free(host_refs);
+        free(strtab);
+        free(patches);
+        free(redirects);
+        free(overlay_data);
+        free(regular_patches);
+        free(stub_patches);
+        free(m.stub_block);
+        free(m.overlays);
+        free(m.stubs);
         elf_reader_close(&reader);
         free(data);
         return 2;

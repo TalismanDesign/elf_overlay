@@ -19,8 +19,7 @@ extern "C" {
  * @param elf      - relocated esp_elf_t (sections already placed)
  * @return ELF_OVERLAY_OK on success
  */
-int elf_overlay_esp_elf_set_section_map(elf_overlay_loader_t *loader,
-                                         esp_elf_t *elf);
+int elf_overlay_esp_elf_set_section_map(elf_overlay_loader_t *loader, esp_elf_t *elf);
 
 /**
  * @brief Install a symbol resolver that routes host references through

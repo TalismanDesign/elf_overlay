@@ -10,14 +10,14 @@ extern "C" {
 
 /* Xtensa dynamic relocation type numbers, per the Espressif Xtensa ISA
  * reference, chapter 5 (ELF Object Files). */
-#define R_XTENSA_RTLD     2
+#define R_XTENSA_RTLD 2
 #define R_XTENSA_GLOB_DAT 3
 #define R_XTENSA_JMP_SLOT 4
 #define R_XTENSA_RELATIVE 5
 
 #define XTENSA_RELATIVE_STR "R_XTENSA_RELATIVE"
 #define XTENSA_JMP_SLOT_STR "R_XTENSA_JMP_SLOT"
-#define XTENSA_RTLD_STR     "R_XTENSA_RTLD"
+#define XTENSA_RTLD_STR "R_XTENSA_RTLD"
 
 typedef struct {
     uint32_t offset;

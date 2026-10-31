@@ -6,13 +6,11 @@
 
 /* AUIPC: rd = (pc & ~0xFFF) + (imm << 12). imm is 20 bits signed. */
 #define RISCV_AUIPC_IMM_SHIFT 12
-#define RISCV_AUIPC_IMM_MASK  0xFFFFF
-#define RISCV_AUIPC_RANGE     (1 << 31) /* ±2MB */
+#define RISCV_AUIPC_IMM_MASK 0xFFFFF
+#define RISCV_AUIPC_RANGE (1 << 31) /* ±2MB */
 
-static int riscv_find_patch_sites(const uint8_t *code, size_t code_len,
-                                   uint32_t pc_base,
-                                   elf_overlay_patch_site_t *sites,
-                                   size_t *site_count) {
+static int riscv_find_patch_sites(const uint8_t *code, size_t code_len, uint32_t pc_base,
+                                  elf_overlay_patch_site_t *sites, size_t *site_count) {
     if (!code || !sites || !site_count) return -1;
 
     size_t count = 0;
@@ -20,8 +18,8 @@ static int riscv_find_patch_sites(const uint8_t *code, size_t code_len,
     size_t offset = 0;
 
     while (offset + 4 <= code_len && count < max_sites) {
-        uint32_t insn = code[offset] | (code[offset+1] << 8) |
-                        (code[offset+2] << 16) | (code[offset+3] << 24);
+        uint32_t insn = code[offset] | (code[offset + 1] << 8) | (code[offset + 2] << 16) |
+                        (code[offset + 3] << 24);
         uint32_t opcode = insn & 0x7F;
 
         if (opcode == RISCV_OPCODE_AUIPC) {
@@ -46,9 +44,8 @@ static int riscv_find_patch_sites(const uint8_t *code, size_t code_len,
     return 0;
 }
 
-static int riscv_encode_patch(uint8_t *insn, size_t insn_len,
-                               uint32_t pc, uint32_t target_addr,
-                               const elf_overlay_patch_site_t *site) {
+static int riscv_encode_patch(uint8_t *insn, size_t insn_len, uint32_t pc, uint32_t target_addr,
+                              const elf_overlay_patch_site_t *site) {
     if (!insn || insn_len < 4 || !site) return -1;
 
     uint32_t pc_aligned = pc & ~0xFFF;
@@ -58,8 +55,7 @@ static int riscv_encode_patch(uint8_t *insn, size_t insn_len,
     if (imm < -0x80000 || imm > 0x7FFFF) return -1;
 
     uint32_t insn_bits = ((uint32_t)(imm & RISCV_AUIPC_IMM_MASK) << 12) |
-                         ((uint32_t)site->reg << 7) |
-                         RISCV_OPCODE_AUIPC;
+                         ((uint32_t)site->reg << 7) | RISCV_OPCODE_AUIPC;
 
     insn[0] = insn_bits & 0xFF;
     insn[1] = (insn_bits >> 8) & 0xFF;
@@ -87,16 +83,14 @@ static size_t riscv_get_stub_alignment(void) {
     return ELF_OVERLAY_STUB_ALIGNMENT;
 }
 
-static const elf_overlay_isa_ops_t riscv_ops = {
-    .name = "riscv",
-    .id = ELF_OVERLAY_ISA_RISCV,
-    .find_patch_sites = riscv_find_patch_sites,
-    .encode_patch = riscv_encode_patch,
-    .is_patch_valid = riscv_is_patch_valid,
-    .get_insn_len = riscv_get_insn_len,
-    .get_stub_stride = riscv_get_stub_stride,
-    .get_stub_alignment = riscv_get_stub_alignment
-};
+static const elf_overlay_isa_ops_t riscv_ops = {.name = "riscv",
+                                                .id = ELF_OVERLAY_ISA_RISCV,
+                                                .find_patch_sites = riscv_find_patch_sites,
+                                                .encode_patch = riscv_encode_patch,
+                                                .is_patch_valid = riscv_is_patch_valid,
+                                                .get_insn_len = riscv_get_insn_len,
+                                                .get_stub_stride = riscv_get_stub_stride,
+                                                .get_stub_alignment = riscv_get_stub_alignment};
 
 void elf_overlay_riscv_init(void) {
     elf_overlay_isa_register(&riscv_ops);

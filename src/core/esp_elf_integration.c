@@ -7,8 +7,7 @@ static uintptr_t esp_elf_symbol_resolver(const char *name) {
     return (uintptr_t)esp_elf_find_symbol(name);
 }
 
-int elf_overlay_esp_elf_set_section_map(elf_overlay_loader_t *loader,
-                                         esp_elf_t *elf) {
+int elf_overlay_esp_elf_set_section_map(elf_overlay_loader_t *loader, esp_elf_t *elf) {
     if (!loader || !elf) return ELF_OVERLAY_ERR_RANGE;
 
     elf_overlay_section_map_t map;

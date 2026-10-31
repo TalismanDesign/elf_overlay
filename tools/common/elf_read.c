@@ -22,20 +22,20 @@
 
 /* ELF32 raw field layouts */
 typedef struct {
-    uint8_t  e_ident[16];
-    uint8_t  e_type[2];
-    uint8_t  e_machine[2];
-    uint8_t  e_version[4];
-    uint8_t  e_entry[4];
-    uint8_t  e_phoff[4];
-    uint8_t  e_shoff[4];
-    uint8_t  e_flags[4];
-    uint8_t  e_ehsize[2];
-    uint8_t  e_phentsize[2];
-    uint8_t  e_phnum[2];
-    uint8_t  e_shentsize[2];
-    uint8_t  e_shnum[2];
-    uint8_t  e_shstrndx[2];
+    uint8_t e_ident[16];
+    uint8_t e_type[2];
+    uint8_t e_machine[2];
+    uint8_t e_version[4];
+    uint8_t e_entry[4];
+    uint8_t e_phoff[4];
+    uint8_t e_shoff[4];
+    uint8_t e_flags[4];
+    uint8_t e_ehsize[2];
+    uint8_t e_phentsize[2];
+    uint8_t e_phnum[2];
+    uint8_t e_shentsize[2];
+    uint8_t e_shnum[2];
+    uint8_t e_shstrndx[2];
 } elf32_ehdr_raw_t;
 
 typedef struct {
@@ -55,15 +55,15 @@ typedef struct {
     uint8_t st_name[4];
     uint8_t st_value[4];
     uint8_t st_size[4];
-    uint8_t  st_info;
-    uint8_t  st_other;
-    uint8_t  st_shndx[2];
+    uint8_t st_info;
+    uint8_t st_other;
+    uint8_t st_shndx[2];
 } elf32_sym_raw_t;
 
 typedef struct {
     uint8_t r_offset[4];
     uint8_t r_info[4];
-    int8_t  r_addend[4];
+    int8_t r_addend[4];
 } elf32_rela_raw_t;
 
 static uint32_t rd_u32_le(const uint8_t *p) {
@@ -92,30 +92,30 @@ static int32_t rd_i32_be(const void *p) {
 
 typedef uint32_t (*rd_u32_fn)(const uint8_t *);
 typedef uint16_t (*rd_u16_fn)(const uint8_t *);
-typedef int32_t  (*rd_i32_fn)(const void *);
+typedef int32_t (*rd_i32_fn)(const void *);
 
 int elf_reader_open(elf_reader_t *reader, const void *data, size_t size) {
     if (!reader || !data || size < sizeof(elf32_ehdr_raw_t)) return -1;
-    
+
     memset(reader, 0, sizeof(*reader));
     reader->data = (const uint8_t *)data;
     reader->size = size;
-    
+
     const uint8_t *p = (const uint8_t *)data;
     if (memcmp(p, ELF_MAGIC, 4) != 0) return -1;
-    
+
     reader->is_64bit = (p[4] != ELF_CLASS32);
     reader->is_little_endian = (p[5] == ELF_DATA_LSB);
-    
+
     if (reader->is_64bit) return -1; /* all current ESP targets are ELF32 */
-    
+
     const elf32_ehdr_raw_t *ehdr = (const elf32_ehdr_raw_t *)p;
     rd_u32_fn u32 = reader->is_little_endian ? rd_u32_le : rd_u32_be;
     rd_u16_fn u16 = reader->is_little_endian ? rd_u16_le : rd_u16_be;
-    
+
     reader->machine = u16(ehdr->e_machine);
     reader->entry = u32(ehdr->e_entry);
-    
+
     return 0;
 }
 
@@ -142,28 +142,28 @@ static int load_sections(elf_reader_t *reader) {
     const elf32_ehdr_raw_t *ehdr = (const elf32_ehdr_raw_t *)p;
     rd_u32_fn u32 = reader->is_little_endian ? rd_u32_le : rd_u32_be;
     rd_u16_fn u16 = reader->is_little_endian ? rd_u16_le : rd_u16_be;
-    
+
     uint32_t shoff = u32(ehdr->e_shoff);
     uint16_t shnum = u16(ehdr->e_shnum);
     uint16_t shentsize = u16(ehdr->e_shentsize);
     uint16_t shstrndx = u16(ehdr->e_shstrndx);
-    
+
     if (shoff == 0 || shoff + (uint32_t)shnum * shentsize > reader->size) return -1;
-    
+
     const elf32_shdr_raw_t *shdrs = (const elf32_shdr_raw_t *)(p + shoff);
-    
+
     /* Section header string table */
     const elf32_shdr_raw_t *shstr_hdr = &shdrs[shstrndx];
     const char *shstrtab = (const char *)(p + u32(shstr_hdr->sh_offset));
-    
+
     reader->sections = calloc(shnum, sizeof(elf_section_t));
     if (!reader->sections) return -1;
     reader->section_count = shnum;
-    
+
     for (uint16_t i = 0; i < shnum; i++) {
         const elf32_shdr_raw_t *s = &shdrs[i];
         elf_section_t *sec = &reader->sections[i];
-        
+
         uint32_t name_off = u32(s->sh_name);
         sec->name = strdup(shstrtab + name_off);
         sec->type = u32(s->sh_type);
@@ -175,9 +175,8 @@ static int load_sections(elf_reader_t *reader) {
         sec->info = u32(s->sh_info);
         sec->addralign = u32(s->sh_addralign);
         sec->entsize = u32(s->sh_entsize);
-        
-        if (sec->type != SHT_NOBITS && sec->size > 0 &&
-            sec->offset + sec->size <= reader->size) {
+
+        if (sec->type != SHT_NOBITS && sec->size > 0 && sec->offset + sec->size <= reader->size) {
             sec->data = malloc(sec->size);
             if (sec->data) {
                 memcpy(sec->data, p + sec->offset, sec->size);
@@ -190,7 +189,7 @@ static int load_sections(elf_reader_t *reader) {
 static int load_symbols(elf_reader_t *reader) {
     elf_section_t *symtab = NULL;
     elf_section_t *strtab = NULL;
-    
+
     for (size_t i = 0; i < reader->section_count; i++) {
         if (reader->sections[i].type == SHT_SYMTAB) {
             symtab = &reader->sections[i];
@@ -199,17 +198,17 @@ static int load_symbols(elf_reader_t *reader) {
         }
     }
     if (!symtab || !strtab || !strtab->data) return 0;
-    
+
     size_t sym_count = symtab->size / sizeof(elf32_sym_raw_t);
     const elf32_sym_raw_t *syms = (const elf32_sym_raw_t *)symtab->data;
     const char *strs = (const char *)strtab->data;
     rd_u32_fn u32 = reader->is_little_endian ? rd_u32_le : rd_u32_be;
     rd_u16_fn u16 = reader->is_little_endian ? rd_u16_le : rd_u16_be;
-    
+
     reader->symbols = calloc(sym_count, sizeof(elf_symbol_t));
     if (!reader->symbols) return -1;
     reader->symbol_count = sym_count;
-    
+
     for (size_t i = 0; i < sym_count; i++) {
         elf_symbol_t *s = &reader->symbols[i];
         s->name = strdup(strs + u32(syms[i].st_name));
@@ -230,27 +229,27 @@ static int load_relocs(elf_reader_t *reader) {
         }
     }
     if (total == 0) return 0;
-    
+
     reader->relocs = calloc(total, sizeof(elf_reloc_t));
     if (!reader->relocs) return -1;
-    
+
     size_t idx = 0;
     rd_u32_fn u32 = reader->is_little_endian ? rd_u32_le : rd_u32_be;
     rd_i32_fn i32 = reader->is_little_endian ? rd_i32_le : rd_i32_be;
-    
+
     for (size_t i = 0; i < reader->section_count; i++) {
         elf_section_t *sec = &reader->sections[i];
         if (sec->type != SHT_RELA || !sec->data) continue;
-        elf_section_t *symtab = sec->link < reader->section_count ?
-                                &reader->sections[sec->link] : NULL;
-        elf_section_t *strtab = (symtab && symtab->link < reader->section_count) ?
-                                &reader->sections[symtab->link] : NULL;
-        const elf32_sym_raw_t *syms = (symtab && symtab->data) ?
-                                      (const elf32_sym_raw_t *)symtab->data : NULL;
+        elf_section_t *symtab =
+            sec->link < reader->section_count ? &reader->sections[sec->link] : NULL;
+        elf_section_t *strtab = (symtab && symtab->link < reader->section_count)
+                                    ? &reader->sections[symtab->link]
+                                    : NULL;
+        const elf32_sym_raw_t *syms =
+            (symtab && symtab->data) ? (const elf32_sym_raw_t *)symtab->data : NULL;
         const char *strs = (strtab && strtab->data) ? (const char *)strtab->data : NULL;
-        size_t sym_count = symtab && symtab->entsize ?
-                           symtab->size / symtab->entsize : 0;
-        
+        size_t sym_count = symtab && symtab->entsize ? symtab->size / symtab->entsize : 0;
+
         size_t n = sec->size / sizeof(elf32_rela_raw_t);
         const elf32_rela_raw_t *relas = (const elf32_rela_raw_t *)sec->data;
         for (size_t j = 0; j < n; j++) {
