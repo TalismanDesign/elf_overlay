@@ -9,11 +9,6 @@
 #define RISCV_AUIPC_IMM_MASK  0xFFFFF
 #define RISCV_AUIPC_RANGE     (1 << 31) /* ±2MB */
 
-static size_t riscv_insn_len(uint8_t first) {
-    (void)first;
-    return 4; /* all RISC-V base instructions are 4 bytes */
-}
-
 static int riscv_find_patch_sites(const uint8_t *code, size_t code_len,
                                    uint32_t pc_base,
                                    elf_overlay_patch_site_t *sites,

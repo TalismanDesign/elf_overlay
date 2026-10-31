@@ -10,7 +10,7 @@
 
 void elf_overlay_xtensa_init(void);
 
-int main() {
+int main(void) {
     printf("test_redirect: starting\n");
     fflush(stdout);
     elf_overlay_xtensa_init();

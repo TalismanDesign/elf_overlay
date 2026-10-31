@@ -91,7 +91,6 @@ void elf_overlay_file_close(elf_overlay_file_t* file) {
   free(file);
 }
 
-static const char* TAG = "elf_overlay";
 #define LOG_BUF_SIZE 256
 
 void elf_overlay_copy_exec(void* dst, const void* src, size_t len) {
@@ -226,8 +225,6 @@ void elf_overlay_file_close(elf_overlay_file_t* file) {
   fclose(file->fp);
   free(file);
 }
-
-static const char* TAG = "elf_overlay";
 
 void elf_overlay_copy_exec(void* dst, const void* src, size_t len) {
   memcpy(dst, src, len);

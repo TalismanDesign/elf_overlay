@@ -56,3 +56,9 @@ dkms.conf
 
 # build
 build/
+
+# Committed test vectors
+!tests/integration/c_fixtures/fixture.elf
+!tests/integration/c_fixtures/fixture.o
+!tests/integration/**/*.elfo
+!tests/integration/**/*.relk

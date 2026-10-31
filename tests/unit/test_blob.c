@@ -5,7 +5,7 @@
 #include <assert.h>
 #include <stdio.h>
 
-int main() {
+int main(void) {
     elf_overlay_header_t hdr;
     memset(&hdr, 0, sizeof(hdr));
 
