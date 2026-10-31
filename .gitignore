@@ -57,8 +57,16 @@ dkms.conf
 # build
 build/
 
+# ESP-IDF component example (generated build artifacts)
+examples/esp_idf_component/sdkconfig
+examples/esp_idf_component/sdkconfig.old
+examples/esp_idf_component/managed_components/
+examples/esp_idf_component/dependencies.lock
+
 # Committed test vectors
-!tests/integration/c_fixtures/fixture.elf
-!tests/integration/c_fixtures/fixture.o
+!examples/host_pipeline/fixture.elf
+!examples/host_pipeline/fixture.o
+!examples/host_pipeline/*.elfo
+!examples/host_pipeline/*.relk
 !tests/integration/**/*.elfo
 !tests/integration/**/*.relk

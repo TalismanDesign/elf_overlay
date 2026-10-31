@@ -16,6 +16,10 @@
 #include "esp_cache.h"
 #endif
 
+#ifndef MALLOC_CAP_EXEC
+#error "elf_overlay needs an executable heap; enable CONFIG_HEAP_HAS_EXEC_HEAP"
+#endif
+
 struct elf_overlay_file {
     FILE *fp;
     size_t size;

@@ -1,0 +1,6 @@
+# elf_overlay needs an executable heap; MALLOC_CAP_EXEC exists only when the
+# exec heap is enabled, which on this target follows from memory protection
+# being off (HEAP_HAS_EXEC_HEAP defaults y when !ESP_SYSTEM_MEMPROT).
+CONFIG_ELF_LOADER=y
+CONFIG_ELF_LOADER_CUSTOMER_SYMBOLS=n
+CONFIG_ESP_SYSTEM_MEMPROT_FEATURE=n

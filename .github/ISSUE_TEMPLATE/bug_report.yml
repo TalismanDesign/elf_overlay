@@ -1,0 +1,44 @@
+name: Bug report
+description: Report a defect in the runtime, the host tools, or the build.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong, and what did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: >
+        The commands or code that trigger the problem. Include the ISA, the
+        target, and whether the failure is on the host or on the device.
+      placeholder: |
+        1. elf_overlay_relink app.elf app.relk
+        2. elf_overlay_emit app.relk app.elfo
+        3. elf_overlay_load returns ...
+    validations:
+      required: true
+  - type: input
+    id: target
+    attributes:
+      label: Target and ISA
+      description: For example, host x86-64, ESP32-S3 Xtensa, or ESP32-C6 RISC-V.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: elf_overlay version or commit
+      description: The release tag or the commit hash you are on.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and output
+      description: Relevant build output, runtime logs, or the panic backtrace.
+      render: shell

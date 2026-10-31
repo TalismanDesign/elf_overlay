@@ -12,11 +12,86 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure CMake
-        run: cmake -S . -B build -DELF_OVERLAY_BUILD_TESTS=ON -DELF_OVERLAY_BUILD_TOOLS=ON
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DELF_OVERLAY_BUILD_TESTS=ON
+          -DELF_OVERLAY_BUILD_TOOLS=ON
+          -DELF_OVERLAY_WERROR=ON
 
       - name: Build
         run: cmake --build build
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (ASan + UBSan)
+        run: >
+          cmake -S . -B build-asan
+          -DELF_OVERLAY_BUILD_TESTS=ON
+          -DELF_OVERLAY_BUILD_TOOLS=ON
+          -DELF_OVERLAY_ASAN=ON
+
+      - name: Build
+        run: cmake --build build-asan
+
+      - name: Run tests
+        env:
+          ASAN_OPTIONS: abort_on_error=1:halt_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ctest --test-dir build-asan --output-on-failure
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+
+      - name: Check formatting
+        run: >
+          find src tools include tests -name build -prune -o
+          \( -name '*.c' -o -name '*.h' \) -print0
+          | xargs -0 clang-format --dry-run --Werror
+
+  fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build host tools
+        run: >
+          cmake -S . -B build -DELF_OVERLAY_BUILD_TOOLS=ON -DELF_OVERLAY_BUILD_TESTS=OFF &&
+          cmake --build build --target elf_overlay_relink elf_overlay_emit
+
+      - name: Install Xtensa toolchain
+        run: |
+          IDF_TOOLS_PATH="$HOME/.espressif"
+          mkdir -p "$IDF_TOOLS_PATH"
+          URL="https://github.com/espressif/crosstool-NG/releases/download/esp-14.2.0_20241119/xtensa-esp-elf-14.2.0_20241119-x86_64-linux-gnu.tar.xz"
+          curl -L "$URL" -o /tmp/xtensa.tar.xz
+          tar -xf /tmp/xtensa.tar.xz -C "$IDF_TOOLS_PATH"
+          echo "$IDF_TOOLS_PATH/xtensa-esp-elf/bin" >> "$GITHUB_PATH"
+
+      - name: Verify fixture round-trip
+        run: |
+          export PATH="$PWD/build:$PATH"
+          make -C examples/host_pipeline check
+
+  device-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build device component
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.3
+          target: esp32s3
+          path: examples/esp_idf_component

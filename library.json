@@ -2,6 +2,7 @@
   "name": "elf_overlay",
   "version": "1.0.0",
   "description": "Universal, ISA-abstracted ELF overlay runtime library",
+  "license": "Apache-2.0",
   "keywords": ["overlay", "elf", "xtensa", "riscv", "embedded"],
   "repository": {
     "type": "git",
@@ -10,11 +11,14 @@
   "authors": [
     {
       "name": "NellowTCS",
-      "email": "nellowtcs@gmail.com"
+      "email": "nellowtcs@gmail.com",
+      "url": "https://github.com/NellowTCS",
+      "maintainer": true
     },
     {
-      "name": "TalismanDesign",
-      "url": "https://github.com/TalismanDesign"
+      "name": "Ashtf",
+      "url": "https://github.com/ashtf8",
+      "maintainer": true
     }
   ],
   "frameworks": [
@@ -29,9 +33,8 @@
       "+<*>",
       "-<tools/>",
       "-<tests/>",
-      "-<build/>",
-      "-<cmake/>",
-      "-<docs/>"
+      "-<examples/>",
+      "-<build/>"
     ],
     "flags": [
       "-DELF_OVERLAY_ESP_IDF=1"

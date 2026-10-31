@@ -1,12 +1,10 @@
 # elf_overlay
 
-Universal, ISA-abstracted ELF overlay runtime library for embedded systems.
+## Description
 
-## Overview
+`elf_overlay` is an ISA-abstracted ELF overlay runtime for embedded systems. It runs alongside an ELF loader (for example Espressif's `elf_loader`) and pages overlay bodies in and out of executable RAM, applying ISA-specific relocations at load time. On Xtensa this is `l32r` PC-relative literal patching; on RISC-V it is `auipc`.
 
-`elf_overlay` is a portable, ISA-agnostic runtime for paged overlay execution on embedded targets. It works alongside ELF loaders (e.g. Espressif's `esp_elf_loader`) to page overlay bodies in and out of exec RAM, applying ISA-specific relocations (l32r on Xtensa, auipc on RISC-V) at load time.
-
-It is target-agnostic: no ESP-IDF, no PocketMageOS, and no RTOS assumptions. A small platform port layer (`port.h`) lets it run on any system with a C compiler and a file system.
+The runtime makes no assumptions about the target. It does not depend on ESP-IDF, on any particular operating system, or on an RTOS. A small platform port layer (`port.h`) lets it run on any system with a C compiler and a file system, and the ESP-IDF port is one implementation of that layer.
 
 ## Architecture
 
@@ -43,20 +41,18 @@ Magic `ELFO`, version 1, ISA-tagged header. Layout:
 +----------------------+
 | stub block           |  enter/leave slots + stub code
 +----------------------+
-| overlay bodies       |  packed code + literal pools
+| overlay bodies       |  verbatim .text images
 +----------------------+
 ```
 
 ### ISA abstraction
 
-ISA-specific code lives behind `elf_overlay_isa_ops_t` (`include/elf_overlay/isa.h`).
-Registered ISAs:
-
-- `xtensa` - l32r PC-relative literal patching (verified against Xtensa ISA doc)
-- `riscv` - auipc PC-relative literal patching
-
-Add a new ISA by implementing `elf_overlay_isa_ops_t` and calling
-`elf_overlay_isa_register()` from an init function.
+ISA-specific code lives behind `elf_overlay_isa_ops_t`
+(`include/elf_overlay/isa.h`). Two ISAs are registered: `xtensa` performs
+`l32r` PC-relative literal patching (verified against the Xtensa ISA reference),
+and `riscv` performs `auipc` PC-relative literal patching. To add another ISA,
+implement `elf_overlay_isa_ops_t` and call `elf_overlay_isa_register()` from an
+init function.
 
 ## Host tools
 
@@ -105,31 +101,31 @@ elf_overlay_loader_t *elf_overlay_get_active(void);
 
 ### Key design
 
-- **Frame pool**: fixed number of exec-RAM frames; overlays page in on demand.
-- **Refcounting**: `enter()` increments, `leave()` decrements. Frames with
-  `refcount > 0` are never evicted.
-- **Lazy patching**: literal pool words and l32r/auipc immediates are patched
-  at page-in time, once the resident addresses are known.
-- **Minimal allocations**: fixed-size tables, no heap churn during page-in.
+The runtime keeps a fixed number of executable-RAM frames and pages overlays in
+on demand. `enter()` increments a frame's reference count and `leave()`
+decrements it; a frame whose count is above zero is never evicted. Compiler
+emitted literals are patched in place within the `.text` image at page-in time,
+once the resident addresses are known, while the PC-relative loads themselves
+(`l32r` / `auipc`) are left untouched. Tables are fixed-size, so there is no heap
+churn during page-in.
 
-## Hooking into esp_elf_loader
+## Hooking into elf_loader
 
-`esp_elf_loader` loads and relocates the resident app ELF. `elf_overlay`
-manages the overlay bodies on top. The integration layer
-(`include/elf_overlay/esp_elf_integration.h`, `src/core/esp_elf_integration.c`)
-provides three call sites:
+`elf_loader` loads and relocates the resident application ELF; `elf_overlay`
+manages the overlay bodies on top of it. The integration layer
+(`include/elf_overlay/esp_elf_integration.h`,
+`src/core/esp_elf_integration.c`) provides three call sites.
 
-1. **After `esp_elf_relocate()`** - call
-   `elf_overlay_esp_elf_set_section_map()` to copy `esp_elf_t.sec[]`
-   (canonical v_addr -> resident addr) into the overlay section map.
-2. **Before app entry** - call
-   `elf_overlay_esp_elf_apply_redirects()` to patch redirect sites in resident
-   memory so paged functions are reached through their stubs.
-3. **At init** - call
-   `elf_overlay_esp_elf_install_symbol_resolver()` so host refs resolve via
-   `esp_elf_find_symbol()`.
+After `esp_elf_relocate()` returns, call
+`elf_overlay_esp_elf_set_section_map()` to copy `esp_elf_t.sec[]` (canonical
+virtual address to resident address) into the overlay section map. Before the
+application entry point runs, call `elf_overlay_esp_elf_apply_redirects()` to
+patch the redirect sites in resident memory so that paged functions are reached
+through their stubs. At init, call
+`elf_overlay_esp_elf_install_symbol_resolver()` so host references resolve
+through `esp_elf_find_symbol()`.
 
-Example flow:
+A typical flow looks like this:
 
 ```c
 esp_elf_t elf;
@@ -147,32 +143,122 @@ elf_overlay_esp_elf_apply_redirects(ov);
 
 ### ESP-IDF port
 
-`src/port/esp_idf.c` implements `port.h` using ESP-IDF APIs
-(`heap_caps_malloc` with `MALLOC_CAP_EXEC`, `ESP_LOG*`, stdio VFS). Enable with
-`-DELF_OVERLAY_ESP_IDF=ON`.
+The ESP-IDF branch of `src/port/port.c` (guarded by `ELF_OVERLAY_ESP_IDF`)
+implements `port.h` using ESP-IDF APIs (`heap_caps_malloc` with
+`MALLOC_CAP_EXEC`, `ESP_LOG*`, stdio VFS, `esp_cache_msync` for PSRAM overlay
+regions on ESP32-S3). `MALLOC_CAP_EXEC` only exists when the IDF exec heap is
+enabled (`CONFIG_HEAP_HAS_EXEC_HEAP`, which defaults on when
+`ESP_SYSTEM_MEMPROT` is off); the port fails to compile with a clear message
+otherwise, since the overlay runtime jumps into the memory it allocates.
+
+## Packaging
+
+`elf_overlay` ships for two embedded build systems.
+
+Under PlatformIO, `library.json` registers it as a library for the `espidf` and
+`arduino` frameworks on `espressif32`. Add a dependency on it in
+`platformio.ini` and add `-DELF_OVERLAY_ESP_IDF=1` to the build flags.
+
+As an ESP-IDF component, `idf_component.yml` together with the `ESP_PLATFORM`
+branch in the root `CMakeLists.txt` register it with `REQUIRES elf_loader` and
+`PRIV_REQUIRES heap esp_common log esp_mm`. The `elf_loader` dependency is pulled
+from the component registry by the component manager. Point
+`EXTRA_COMPONENT_DIRS` at the repository root, or add it with the component
+manager.
+
+## Examples
+
+The `examples/` directory holds runnable consumer examples that CI also builds.
+`examples/host_pipeline` takes a single C function from source through
+`relink`, `emit`, load, and `enter` / `leave` on the host; its `make check`
+target round-trips the result against the committed test vectors.
+`examples/esp_idf_component` is a minimal ESP-IDF project that consumes
+`elf_overlay` as a component and is built by the `device-build` CI job. Each
+example has its own README.
 
 ## Building
 
-```bash
-# Host build (tests + tools)
-mkdir build && cd build
-cmake ..
-make
-ctest
+### Host (tests + tools)
 
-# Device build (ESP-IDF)
-cmake .. -DELF_OVERLAY_ESP_IDF=ON
-make
+```bash
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build
 ```
+
+CMake options:
+
+| Option                     | Default | Effect                                        |
+| -------------------------- | ------- | --------------------------------------------- |
+| `ELF_OVERLAY_BUILD_TESTS`  | `ON`    | Build the unit/host test executables          |
+| `ELF_OVERLAY_BUILD_TOOLS`  | `ON`    | Build `elf_overlay_relink` / `elf_overlay_emit` |
+| `ELF_OVERLAY_ESP_IDF`      | `OFF`   | Build the ESP-IDF port + esp_elf integration  |
+| `ELF_OVERLAY_ESP_ELF_INCLUDE` | `""` | Path to `esp_elf.h` parent dir (standalone)   |
+| `ELF_OVERLAY_WERROR`       | `OFF`   | Promote warnings to errors (CI)               |
+| `ELF_OVERLAY_ASAN`         | `OFF`   | AddressSanitizer + UBSan (host only)          |
+
+### Device (ESP-IDF)
+
+Build it as a component from the minimal project used by CI:
+
+```bash
+idf.py -C examples/esp_idf_component \
+  -DELF_LOADER_DIR=/path/to/elf_loader set-target esp32s3 build
+```
+
+Omit `ELF_LOADER_DIR` to let the component manager fetch `elf_loader` from the
+registry.
+
+### Runtime limits
+
+The runtime sizes are compile-time constants in
+`include/elf_overlay/config.h`, each guarded by `#ifndef` so a consumer can
+override it with a `-D` flag without editing the header.
+
+| Define                           | Default | Meaning                              |
+| -------------------------------- | ------- | ------------------------------------ |
+| `ELF_OVERLAY_MAX_FRAMES`         | `4`     | Executable-RAM frames in the pool    |
+| `ELF_OVERLAY_DEFAULT_FRAME_SIZE` | `16384` | Bytes per frame                      |
+| `ELF_OVERLAY_MAX_SECTIONS`       | `8`     | Section-map entries                  |
 
 ## Testing
 
-- `ctest` runs 5 tests: ISA registration, blob validation, l32r encoding,
-  manifest round-trip, host blob load.
-- `tests/integration/c_fixtures/` contains a real Xtensa C fixture compiled
-  with `xtensa-esp32s3-elf-gcc`, processed end-to-end through
-  `relink` -> `emit` -> `elf_overlay_load` -> `enter`/`leave`.
+`ctest` runs seven tests covering ISA registration, blob validation, `l32r`
+encoding, manifest round-trip, host blob load, redirect wiring, and host-ref
+resolution (including the unresolved-symbol abort). Run the suite under
+AddressSanitizer and UBSan by configuring with `-DELF_OVERLAY_ASAN=ON`.
+
+`examples/host_pipeline` holds a real Xtensa C fixture compiled with
+`xtensa-esp32s3-elf-gcc` and processed end to end through `relink`, `emit`,
+`elf_overlay_load`, and `enter` / `leave`. Its `Makefile` regenerates the
+committed `.elf`, `.o`, `.relk`, and `.elfo` vectors from source, and
+`make check` fails if the current tools drift from the committed blobs.
+
+## Formatting
+
+`.clang-format` encodes the in-tree style (LLVM base, 4-space indent, 100-col,
+`type *name` pointers, attached braces). Format the tree with:
+
+```bash
+find src tools include tests \( -name '*.c' -o -name '*.h' \) \
+  -print0 | xargs -0 clang-format -i
+```
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs five jobs on push and pull request. The `build`
+job runs the host build and `ctest` with `-Werror`. The `sanitizers` job runs
+the same suite under AddressSanitizer and UBSan. The `format` job runs
+`clang-format --dry-run --Werror` over the tree. The `fixtures` job regenerates
+the C fixture and verifies the committed blobs still match
+(`make -C examples/host_pipeline check`). The `device-build` job builds
+`elf_overlay` as an ESP-IDF component for ESP32-S3.
+
+## Contributing
+
+See `CONTRIBUTING.md` for the build, test, and formatting steps expected before
+a pull request. User-visible changes are recorded in `CHANGELOG.md`.
 
 ## License
 
-See LICENSE file.
+Apache-2.0. See the `LICENSE` file.

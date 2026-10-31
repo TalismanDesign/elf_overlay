@@ -1,3 +1,23 @@
+if(ESP_PLATFORM)
+    set(elf_overlay_srcs
+        src/isa/isa.c
+        src/isa/xtensa/patch.c
+        src/isa/riscv/patch.c
+        src/core/blob.c
+        src/core/loader.c
+        src/port/port.c
+        src/core/esp_elf_integration.c
+    )
+    idf_component_register(
+        SRCS ${elf_overlay_srcs}
+        INCLUDE_DIRS include
+        REQUIRES elf_loader
+        PRIV_REQUIRES heap esp_common log esp_mm
+    )
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC ELF_OVERLAY_ESP_IDF=1)
+    return()
+endif()
+
 cmake_minimum_required(VERSION 3.16)
 project(elf_overlay VERSION 1.0.0 LANGUAGES C CXX)
 
@@ -36,7 +56,7 @@ endif()
 
 include_directories(include tools/common)
 
-# Core library
+# Core runtime library.
 add_library(elf_overlay
     src/isa/isa.c
     src/isa/xtensa/patch.c
@@ -44,7 +64,6 @@ add_library(elf_overlay
     src/core/blob.c
     src/core/loader.c
     src/port/port.c
-    tools/common/blob_pack.c
 )
 
 # esp_elf_loader integration (device builds only)
@@ -78,16 +97,16 @@ if(ELF_OVERLAY_BUILD_TESTS)
     elf_overlay_add_exe(test_load tests/host/test_load.c)
     add_test(NAME host_load_test COMMAND test_load ${CMAKE_SOURCE_DIR}/tests/integration/fixtures/minimal.elfo)
     elf_overlay_add_exe(test_fixture tests/host/test_fixture.c)
-    add_test(NAME host_fixture_test COMMAND test_fixture ${CMAKE_SOURCE_DIR}/tests/integration/c_fixtures/fixture.elfo)
-    elf_overlay_add_exe(test_redirect tests/unit/test_redirect.c)
+    add_test(NAME host_fixture_test COMMAND test_fixture ${CMAKE_SOURCE_DIR}/examples/host_pipeline/fixture.elfo)
+    elf_overlay_add_exe(test_redirect tests/unit/test_redirect.c tools/common/blob_pack.c)
     add_test(NAME redirect_test COMMAND test_redirect)
-    elf_overlay_add_exe(test_hostref tests/unit/test_hostref.c)
+    elf_overlay_add_exe(test_hostref tests/unit/test_hostref.c tools/common/blob_pack.c)
     add_test(NAME hostref_test COMMAND test_hostref)
 endif()
 
 # Tools
 if(ELF_OVERLAY_BUILD_TOOLS)
     elf_overlay_add_exe(elf_overlay_relink tools/relink/main.c
-        tools/common/elf_read.c tools/common/reloc.c)
-    elf_overlay_add_exe(elf_overlay_emit tools/emit/main.c)
+        tools/common/elf_read.c tools/common/reloc.c tools/common/blob_pack.c)
+    elf_overlay_add_exe(elf_overlay_emit tools/emit/main.c tools/common/blob_pack.c)
 endif()
