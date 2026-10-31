@@ -1,6 +1,8 @@
 version: "1.0.0"
 description: Universal, ISA-abstracted ELF overlay runtime library
 url: https://github.com/TalismanDesign/elf_overlay
+repository: https://github.com/TalismanDesign/elf_overlay.git
+issues: https://github.com/TalismanDesign/elf_overlay/issues
 license: "Apache-2.0"
 targets:
   - esp32
@@ -15,6 +17,12 @@ dependencies:
   espressif/elf_loader: "*"
 examples:
   - path: examples/esp_idf_component
+files:
+  exclude:
+    - "tests/**/*"
+    - "TODO.md"
+    - ".clang-format"
+    - ".editorconfig"
 sbom:
   supplier: "Organization: TalismanDesign"
   originator: "Organization: TalismanDesign"

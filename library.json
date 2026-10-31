@@ -28,6 +28,27 @@
   "platforms": [
     "espressif32"
   ],
+  "export": {
+    "include": [
+      "src",
+      "include",
+      "tools",
+      "examples",
+      "CMakeLists.txt",
+      "idf_component.yml",
+      "library.json",
+      "README.md",
+      "CHANGELOG.md",
+      "CONTRIBUTING.md",
+      "LICENSE"
+    ],
+    "exclude": [
+      "examples/*/build",
+      "examples/*/managed_components",
+      "examples/*/sdkconfig",
+      "examples/*/dependencies.lock"
+    ]
+  },
   "build": {
     "srcFilter": [
       "+<*>",
