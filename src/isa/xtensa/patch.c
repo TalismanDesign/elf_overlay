@@ -12,17 +12,10 @@ static size_t xtensa_insn_len(uint8_t first) {
     return 3;
 }
 
-static int16_t xtensa_sign16(uint16_t val) {
-    if (val & 0x8000) {
-        return (int16_t)(val - 0x10000);
-    }
-    return (int16_t)val;
-}
-
 static uint32_t xtensa_l32r_literal(uint32_t pc, uint16_t imm) {
-    uint32_t aligned = (pc + 3) & ~3;
-    int32_t delta = xtensa_sign16(imm);
-    return aligned + (delta << 2);
+    uint32_t aligned = (pc + 3) & ~3u;
+    uint32_t offset = 0xFFFC0000u | ((uint32_t)imm << 2);
+    return aligned + offset;
 }
 
 static int xtensa_find_patch_sites(const uint8_t *code, size_t code_len, uint32_t pc_base,
@@ -60,12 +53,14 @@ static int xtensa_encode_patch(uint8_t *insn, size_t insn_len, uint32_t pc, uint
                                const elf_overlay_patch_site_t *site) {
     if (!insn || insn_len < 3 || !site) return -1;
 
-    uint32_t aligned_pc = (pc + 3) & ~3;
-    int32_t delta = (int32_t)target_addr - (int32_t)aligned_pc;
+    uint32_t aligned_pc = (pc + 3) & ~3u;
+    // Subtract as uint32_t to avoid overflow, then cast to int32_t.
+    int32_t delta = (int32_t)((uint32_t)target_addr - aligned_pc);
 
     if (delta % 4 != 0) return -1;
-    int32_t imm = delta >> 2;
-    if (imm < -0x8000 || imm > 0x7FFF) return -1;
+    int32_t imm = delta / 4;
+    // L32R can only reach backwards: -262144 to -4 bytes.
+    if (imm < -0x8000 || imm > -1) return -1;
 
     uint8_t reg = (insn[0] >> 4) & 0xF;
     (void)site;
@@ -79,8 +74,7 @@ static int xtensa_encode_patch(uint8_t *insn, size_t insn_len, uint32_t pc, uint
 
 static bool xtensa_is_patch_valid(int32_t delta) {
     if (delta % 4 != 0) return false;
-    int32_t imm = delta >> 2;
-    return (imm >= -0x8000 && imm <= 0x7FFF);
+    return delta >= -0x40000 && delta <= -4;   // L32R can only reach backwards
 }
 
 static size_t xtensa_get_insn_len(void) {
