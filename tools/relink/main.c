@@ -150,7 +150,9 @@ int main(int argc, char **argv) {
         free(data);
         return 2;
     }
-    pack_hostref_t *host_refs = calloc(n ? n : 1, sizeof(pack_hostref_t));
+    size_t host_ref_cap = n + reader.reloc_count;
+    if (host_ref_cap == 0) host_ref_cap = 1;
+    pack_hostref_t *host_refs = calloc(host_ref_cap, sizeof(pack_hostref_t));
     if (!host_refs) {
         free(patches);
         free(overlay_data);
@@ -253,6 +255,53 @@ int main(int argc, char **argv) {
             patches[patch_count].pad = 0;
             patch_count++;
         }
+    }
+
+    /* Emit a host_ref straight from the reloc table for every in-.text
+     * JMP_SLOT/GLOB_DAT slot the scan didn't already cover. */
+    for (size_t r = 0; r < reader.reloc_count; r++) {
+        uint32_t type = reader.relocs[r].r_info & 0xff;
+        if (!reloc_is_host_symbol(type)) continue;
+
+        const char *sym = reader.relocs[r].symbol;
+        if (!sym || !sym[0]) continue;
+
+        uint32_t slot_addr = reader.relocs[r].r_offset;
+        if (slot_addr < text->addr || slot_addr + 4 > text->addr + text->size) continue;
+
+        uint16_t blob_offset = (uint16_t)(slot_addr - text->addr);
+
+        bool already = false;
+        for (size_t h = 0; h < host_ref_count; h++) {
+            if (host_refs[h].blob_offset == blob_offset) {
+                already = true;
+                break;
+            }
+        }
+        if (already) continue;
+
+        size_t name_off = strtab_size;
+        size_t name_len = strlen(sym) + 1;
+        char *next = realloc(strtab, strtab_size + name_len);
+        if (!next) {
+            free(strtab);
+            free(host_refs);
+            free(patches);
+            free(overlay_data);
+            elf_reader_close(&reader);
+            free(data);
+            return 2;
+        }
+        strtab = next;
+        memcpy(strtab + name_off, sym, name_len);
+        strtab_size += name_len;
+
+        host_refs[host_ref_count].overlay_id = 1;
+        host_refs[host_ref_count].blob_offset = blob_offset;
+        host_refs[host_ref_count].insn_offset = 0;
+        host_refs[host_ref_count].pad = 0;
+        host_refs[host_ref_count].name_off = (uint32_t)name_off;
+        host_ref_count++;
     }
 
     pack_redirect_t *redirects = NULL;

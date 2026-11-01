@@ -110,3 +110,11 @@ if(ELF_OVERLAY_BUILD_TOOLS)
         tools/common/elf_read.c tools/common/reloc.c tools/common/blob_pack.c)
     elf_overlay_add_exe(elf_overlay_emit tools/emit/main.c tools/common/blob_pack.c)
 endif()
+
+if(ELF_OVERLAY_BUILD_TESTS AND ELF_OVERLAY_BUILD_TOOLS)
+    elf_overlay_add_exe(test_plt_hostrefs tests/integration/test_plt_hostrefs.c
+        tools/common/elf_read.c tools/common/reloc.c)
+    add_test(NAME plt_hostrefs_test COMMAND test_plt_hostrefs
+        $<TARGET_FILE:elf_overlay_relink> $<TARGET_FILE:elf_overlay_emit>
+        ${CMAKE_SOURCE_DIR}/tests/integration/fixtures/xtensa_plt_hostrefs.tool)
+endif()
