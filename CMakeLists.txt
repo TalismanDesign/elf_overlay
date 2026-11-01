@@ -102,6 +102,8 @@ if(ELF_OVERLAY_BUILD_TESTS)
     add_test(NAME redirect_test COMMAND test_redirect)
     elf_overlay_add_exe(test_hostref tests/unit/test_hostref.c tools/common/blob_pack.c)
     add_test(NAME hostref_test COMMAND test_hostref)
+    elf_overlay_add_exe(test_patch_constant tests/unit/test_patch_constant.c tools/common/blob_pack.c)
+    add_test(NAME patch_constant_test COMMAND test_patch_constant)
 endif()
 
 # Tools

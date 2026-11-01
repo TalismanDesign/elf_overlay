@@ -24,6 +24,11 @@ void elf_overlay_riscv_init(void);
 #define STUB_SLOTS_SIZE ELF_OVERLAY_STUB_SLOTS_SIZE
 #define XTENSA_STUB_STRIDE ELF_OVERLAY_XTENSA_STUB_STRIDE
 
+/* st_info low nibble is the symbol type; STT_FUNC marks a function. Only
+ * functions get stubs, so a sized data symbol living in .text is skipped. */
+#define STT_FUNC 2
+#define ELF_ST_TYPE(info) ((info) & 0xf)
+
 /* Read a 32-bit word from ELF section data at the given virtual address.
  * Returns 0 if the address is not in any loaded section. */
 static uint32_t read_word_at(elf_reader_t *reader, uint32_t addr) {
@@ -35,18 +40,6 @@ static uint32_t read_word_at(elf_reader_t *reader, uint32_t addr) {
     uint32_t val;
     memcpy(&val, sec->data + off, 4);
     return val;
-}
-
-/* Find a dynamic relocation whose r_offset matches the given virtual address.
- * Returns the matching reloc, or NULL. The returned type (low byte of r_info)
- * and symbol name let a caller decide how the pointed-to word must resolve. */
-static const elf_reloc_t *reloc_at(elf_reader_t *reader, uint32_t addr) {
-    for (size_t r = 0; r < reader->reloc_count; r++) {
-        if (reader->relocs[r].r_offset == addr) {
-            return &reader->relocs[r];
-        }
-    }
-    return NULL;
 }
 
 static bool reloc_is_host_symbol(uint32_t type) {
@@ -67,15 +60,29 @@ int main(int argc, char **argv) {
         fprintf(stderr, "cannot open %s\n", elf_path);
         return 2;
     }
-    fseek(fp, 0, SEEK_END);
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fprintf(stderr, "cannot seek %s\n", elf_path);
+        fclose(fp);
+        return 2;
+    }
     long fsize = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    uint8_t *data = malloc(fsize);
+    if (fsize <= 0) {
+        fprintf(stderr, "empty or unseekable %s\n", elf_path);
+        fclose(fp);
+        return 2;
+    }
+    rewind(fp);
+    uint8_t *data = malloc((size_t)fsize);
     if (!data) {
         fclose(fp);
         return 2;
     }
-    fread(data, 1, fsize, fp);
+    if (fread(data, 1, (size_t)fsize, fp) != (size_t)fsize) {
+        fprintf(stderr, "short read on %s\n", elf_path);
+        free(data);
+        fclose(fp);
+        return 2;
+    }
     fclose(fp);
 
     elf_reader_t reader;
@@ -102,14 +109,6 @@ int main(int argc, char **argv) {
     else if (reader.machine == EM_ARM)
         isa = ELF_OVERLAY_ISA_ARM;
 
-    const elf_overlay_isa_ops_t *isa_ops = elf_overlay_isa_get(isa);
-    if (!isa_ops) {
-        fprintf(stderr, "no ISA ops for machine %u\n", reader.machine);
-        elf_reader_close(&reader);
-        free(data);
-        return 2;
-    }
-
     /* Find .text section */
     elf_section_t *text = elf_section_by_name(&reader, ".text");
     if (!text || !text->data || text->size == 0) {
@@ -119,17 +118,26 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    /* Scan for l32r/auipc sites */
-    elf_overlay_patch_site_t sites[256];
-    size_t n = 256;
-    if (isa_ops->find_patch_sites(text->data, text->size, text->addr, sites, &n) != 0) {
-        fprintf(stderr, "failed to scan patch sites\n");
+    /* The overlay format stores blob_offset/insn_offset as 16-bit; a .text
+     * larger than 64 KiB cannot be represented. Reject it up front rather than
+     * silently wrapping those fields later. */
+    if (text->size > 0xFFFF) {
+        fprintf(stderr, "error: .text is %zu bytes; the overlay format caps it at 65535\n",
+                (size_t)text->size);
         elf_reader_close(&reader);
         free(data);
         return 2;
     }
 
-    printf("machine=%u isa=%u .text=0x%x+%zu patch_sites=%zu\n", reader.machine, isa,
+    /* Literal sites come from the ELF's own dynamic relocs, not from decoding
+     * .text. The start of .text is a literal pool, so a linear sweep never
+     * lines up with real instruction boundaries: it invents sites and misses
+     * real ones. Every literal that must change at load time has a reloc (it
+     * is exactly the set esp_elf patches in its resident copy), so this list
+     * is exact by construction. n is only an upper bound for table sizing. */
+    size_t n = reader.reloc_count;
+
+    printf("machine=%u isa=%u .text=0x%x+%zu literal_relocs=%zu\n", reader.machine, isa,
            (unsigned int)text->addr, (size_t)text->size, n);
 
     size_t overlay_data_size = text->size;
@@ -173,61 +181,38 @@ int main(int argc, char **argv) {
 
     size_t patch_count = 0;
     size_t host_ref_count = 0;
-    for (size_t i = 0; i < n; i++) {
-        uint32_t lit_addr = sites[i].imm; /* literal address from ISA decoding */
-        bool in_text = lit_addr >= text->addr && lit_addr + 4 <= text->addr + text->size;
+    for (size_t r = 0; r < reader.reloc_count; r++) {
+        uint32_t type = reader.relocs[r].r_info & 0xff;
+        uint32_t lit_addr = reader.relocs[r].r_offset;
+        if (lit_addr < text->addr || lit_addr + 4 > text->addr + text->size) continue;
+        uint16_t blob_offset = (uint16_t)(lit_addr - text->addr);
 
-        /* A JMP_SLOT / GLOB_DAT reloc at the literal address marks a reference
-         * whose target is a named host symbol resolved at load time */
-        const elf_reloc_t *rel = reloc_at(&reader, lit_addr);
-        const char *host_symbol = NULL;
-        if (rel && reloc_is_host_symbol(rel->r_info & 0xff) && rel->symbol && rel->symbol[0]) {
-            host_symbol = rel->symbol;
-        }
+        /* Literal-pool patching only: the l32r stays PC-relative to its pool
+         * slot, and the whole .text block relocates together, so the original
+         * encoding still resolves. No instruction re-encode is requested. */
+        uint16_t insn_offset = ELF_OVERLAY_INSN_OFFSET_NONE;
 
-        /* A literal that holds the address of one of this image's own functions is a
-         * stub target; the runtime rewrites it to point at the generated stub. */
-        bool is_func_pointer = false;
-        if (in_text) {
-            uint32_t word = read_word_at(&reader, lit_addr);
-            for (size_t si = 0; si < reader.symbol_count; si++) {
-                elf_symbol_t *sym = &reader.symbols[si];
-                if (!sym->name || sym->size == 0) continue;
-                if (sym->shndx >= reader.section_count) continue;
-                elf_section_t *ss = &reader.sections[sym->shndx];
-                if (ss->addr != text->addr || strcmp(ss->name, text->name) != 0) continue;
-                if (sym->value == word) {
-                    is_func_pointer = true;
+        if (type == R_XTENSA_RELATIVE) {
+            /* Word at lit_addr holds an address that needs the load delta applied. */
+            bool dup = false;
+            for (size_t p = 0; p < patch_count; p++) {
+                if (patches[p].blob_offset == blob_offset) {
+                    dup = true;
                     break;
                 }
             }
-        }
+            if (dup) continue;
+            patches[patch_count].overlay_id = 1;
+            patches[patch_count].blob_offset = blob_offset;
+            patches[patch_count].insn_offset = insn_offset;
+            patches[patch_count].pad = 0;
+            patch_count++;
+        } else if (reloc_is_host_symbol(type)) {
+            const char *sym = reader.relocs[r].symbol;
+            if (!sym || !sym[0]) continue;
 
-        /* Refuse to emit a broken blob. */
-        if (!in_text && (host_symbol || is_func_pointer)) {
-            fprintf(stderr,
-                    "error: literal at 0x%x requires resolution (%s) but lies "
-                    "outside .text [0x%x, 0x%x); the in-place patcher cannot "
-                    "reach it\n",
-                    lit_addr, host_symbol ? host_symbol : "function pointer", text->addr,
-                    text->addr + text->size);
-            free(strtab);
-            free(host_refs);
-            free(patches);
-            free(overlay_data);
-            elf_reader_close(&reader);
-            free(data);
-            return 2;
-        }
-
-        if (!in_text) {
-            continue;
-        }
-        uint16_t blob_offset = (uint16_t)(lit_addr - text->addr);
-
-        if (host_symbol) {
             size_t name_off = strtab_size;
-            size_t name_len = strlen(host_symbol) + 1;
+            size_t name_len = strlen(sym) + 1;
             char *next = realloc(strtab, strtab_size + name_len);
             if (!next) {
                 free(strtab);
@@ -239,69 +224,16 @@ int main(int argc, char **argv) {
                 return 2;
             }
             strtab = next;
-            memcpy(strtab + name_off, host_symbol, name_len);
+            memcpy(strtab + name_off, sym, name_len);
             strtab_size += name_len;
 
             host_refs[host_ref_count].overlay_id = 1;
             host_refs[host_ref_count].blob_offset = blob_offset;
-            host_refs[host_ref_count].insn_offset = 0;
+            host_refs[host_ref_count].insn_offset = insn_offset;
             host_refs[host_ref_count].pad = 0;
             host_refs[host_ref_count].name_off = (uint32_t)name_off;
             host_ref_count++;
-        } else {
-            patches[patch_count].overlay_id = 1;
-            patches[patch_count].blob_offset = blob_offset;
-            patches[patch_count].insn_offset = 0;
-            patches[patch_count].pad = 0;
-            patch_count++;
         }
-    }
-
-    /* Emit a host_ref straight from the reloc table for every in-.text
-     * JMP_SLOT/GLOB_DAT slot the scan didn't already cover. */
-    for (size_t r = 0; r < reader.reloc_count; r++) {
-        uint32_t type = reader.relocs[r].r_info & 0xff;
-        if (!reloc_is_host_symbol(type)) continue;
-
-        const char *sym = reader.relocs[r].symbol;
-        if (!sym || !sym[0]) continue;
-
-        uint32_t slot_addr = reader.relocs[r].r_offset;
-        if (slot_addr < text->addr || slot_addr + 4 > text->addr + text->size) continue;
-
-        uint16_t blob_offset = (uint16_t)(slot_addr - text->addr);
-
-        bool already = false;
-        for (size_t h = 0; h < host_ref_count; h++) {
-            if (host_refs[h].blob_offset == blob_offset) {
-                already = true;
-                break;
-            }
-        }
-        if (already) continue;
-
-        size_t name_off = strtab_size;
-        size_t name_len = strlen(sym) + 1;
-        char *next = realloc(strtab, strtab_size + name_len);
-        if (!next) {
-            free(strtab);
-            free(host_refs);
-            free(patches);
-            free(overlay_data);
-            elf_reader_close(&reader);
-            free(data);
-            return 2;
-        }
-        strtab = next;
-        memcpy(strtab + name_off, sym, name_len);
-        strtab_size += name_len;
-
-        host_refs[host_ref_count].overlay_id = 1;
-        host_refs[host_ref_count].blob_offset = blob_offset;
-        host_refs[host_ref_count].insn_offset = 0;
-        host_refs[host_ref_count].pad = 0;
-        host_refs[host_ref_count].name_off = (uint32_t)name_off;
-        host_ref_count++;
     }
 
     pack_redirect_t *redirects = NULL;
@@ -348,6 +280,7 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < reader.symbol_count; i++) {
         elf_symbol_t *sym = &reader.symbols[i];
         if (!sym->name || sym->size == 0) continue;
+        if (ELF_ST_TYPE(sym->info) != STT_FUNC) continue;
         if (sym->shndx >= reader.section_count) continue;
         elf_section_t *sec = &reader.sections[sym->shndx];
         if (sec->addr != text->addr || strcmp(sec->name, text->name) != 0) continue;
@@ -385,6 +318,7 @@ int main(int argc, char **argv) {
     for (size_t i = 0; i < reader.symbol_count; i++) {
         elf_symbol_t *sym = &reader.symbols[i];
         if (!sym->name || sym->size == 0) continue;
+        if (ELF_ST_TYPE(sym->info) != STT_FUNC) continue;
         if (sym->shndx >= reader.section_count) continue;
         elf_section_t *sec = &reader.sections[sym->shndx];
         if (sec->addr != text->addr || strcmp(sec->name, text->name) != 0) continue;

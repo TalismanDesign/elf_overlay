@@ -148,13 +148,21 @@ static int load_sections(elf_reader_t *reader) {
     uint16_t shentsize = u16(ehdr->e_shentsize);
     uint16_t shstrndx = u16(ehdr->e_shstrndx);
 
-    if (shoff == 0 || shoff + (uint32_t)shnum * shentsize > reader->size) return -1;
+    if (shoff == 0 || shnum == 0) return -1;
+    if (shentsize < sizeof(elf32_shdr_raw_t)) return -1;
+    /* shoff + shnum*shentsize is computed in 64-bit to avoid a u32 wrap that
+     * would let an out-of-file header table pass the bounds check. */
+    if ((uint64_t)shoff + (uint64_t)shnum * shentsize > reader->size) return -1;
+    if (shstrndx >= shnum) return -1;
 
     const elf32_shdr_raw_t *shdrs = (const elf32_shdr_raw_t *)(p + shoff);
 
     /* Section header string table */
     const elf32_shdr_raw_t *shstr_hdr = &shdrs[shstrndx];
-    const char *shstrtab = (const char *)(p + u32(shstr_hdr->sh_offset));
+    uint32_t shstr_off = u32(shstr_hdr->sh_offset);
+    uint32_t shstr_size = u32(shstr_hdr->sh_size);
+    if ((uint64_t)shstr_off + shstr_size > reader->size) return -1;
+    const char *shstrtab = (const char *)(p + shstr_off);
 
     reader->sections = calloc(shnum, sizeof(elf_section_t));
     if (!reader->sections) return -1;
@@ -165,7 +173,9 @@ static int load_sections(elf_reader_t *reader) {
         elf_section_t *sec = &reader->sections[i];
 
         uint32_t name_off = u32(s->sh_name);
-        sec->name = strdup(shstrtab + name_off);
+        /* A name offset past the string table would read out of bounds; clamp
+         * it to the table's trailing NUL so strdup yields an empty name. */
+        sec->name = strdup(name_off < shstr_size ? shstrtab + name_off : "");
         sec->type = u32(s->sh_type);
         sec->flags = u32(s->sh_flags);
         sec->addr = u32(s->sh_addr);
@@ -176,7 +186,8 @@ static int load_sections(elf_reader_t *reader) {
         sec->addralign = u32(s->sh_addralign);
         sec->entsize = u32(s->sh_entsize);
 
-        if (sec->type != SHT_NOBITS && sec->size > 0 && sec->offset + sec->size <= reader->size) {
+        if (sec->type != SHT_NOBITS && sec->size > 0 &&
+            (uint64_t)sec->offset + sec->size <= reader->size) {
             sec->data = malloc(sec->size);
             if (sec->data) {
                 memcpy(sec->data, p + sec->offset, sec->size);
@@ -193,25 +204,31 @@ static int load_symbols(elf_reader_t *reader) {
     for (size_t i = 0; i < reader->section_count; i++) {
         if (reader->sections[i].type == SHT_SYMTAB) {
             symtab = &reader->sections[i];
-            strtab = &reader->sections[symtab->link];
+            if (symtab->link < reader->section_count) {
+                strtab = &reader->sections[symtab->link];
+            }
             break;
         }
     }
-    if (!symtab || !strtab || !strtab->data) return 0;
+    /* Need both tables populated: a symtab with no data, or a link pointing
+     * outside the section array, cannot be read. */
+    if (!symtab || !symtab->data || !strtab || !strtab->data) return 0;
 
     size_t sym_count = symtab->size / sizeof(elf32_sym_raw_t);
     const elf32_sym_raw_t *syms = (const elf32_sym_raw_t *)symtab->data;
     const char *strs = (const char *)strtab->data;
+    uint32_t strtab_size = strtab->size;
     rd_u32_fn u32 = reader->is_little_endian ? rd_u32_le : rd_u32_be;
     rd_u16_fn u16 = reader->is_little_endian ? rd_u16_le : rd_u16_be;
 
-    reader->symbols = calloc(sym_count, sizeof(elf_symbol_t));
+    reader->symbols = calloc(sym_count ? sym_count : 1, sizeof(elf_symbol_t));
     if (!reader->symbols) return -1;
     reader->symbol_count = sym_count;
 
     for (size_t i = 0; i < sym_count; i++) {
         elf_symbol_t *s = &reader->symbols[i];
-        s->name = strdup(strs + u32(syms[i].st_name));
+        uint32_t name_off = u32(syms[i].st_name);
+        s->name = strdup(name_off < strtab_size ? strs + name_off : "");
         s->value = u32(syms[i].st_value);
         s->size = u32(syms[i].st_size);
         s->info = syms[i].st_info;
@@ -267,7 +284,9 @@ static int load_relocs(elf_reader_t *reader) {
             idx++;
         }
     }
-    reader->reloc_count = total;
+    /* Count only the relocs actually written: RELA sections with no loaded data
+     * were skipped above, so `total` would otherwise leave zeroed phantoms. */
+    reader->reloc_count = idx;
     return 0;
 }
 

@@ -2,36 +2,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Xtensa relocation type numbers */
+/* Xtensa relocation type numbers, per binutils include/elf/xtensa.h. The
+ * dynamic types (RTLD/GLOB_DAT/JMP_SLOT/RELATIVE) come from reloc.h so there is
+ * a single source of truth; only the extra static-type names are defined here.
+ * CALL16 is an assembler operand syntax, not an ELF reloc type, so it is not
+ * listed. */
 #define R_XTENSA_NONE 0
 #define R_XTENSA_32 1
-#define R_XTENSA_ASM_EXPAND 2
-#define R_XTENSA_SLOT0_OP 3
-#define R_XTENSA_SLOT1_OP 4
-#define R_XTENSA_SLOT2_OP 5
-#define R_XTENSA_SLOT3_OP 6
-#define R_XTENSA_SLOT4_OP 7
-#define R_XTENSA_SLOT5_OP 8
-#define R_XTENSA_SLOT6_OP 9
-#define R_XTENSA_SLOT7_OP 10
-#define R_XTENSA_SLOT8_OP 11
-#define R_XTENSA_SLOT9_OP 12
-#define R_XTENSA_SLOT10_OP 13
-#define R_XTENSA_SLOT11_OP 14
-#define R_XTENSA_SLOT_OP 15
-#define R_XTENSA_32_PCREL 16
-#define R_XTENSA_TLS_DTPMOD 20
-#define R_XTENSA_TLS_DTPOFF 21
-#define R_XTENSA_TLS_TPOFF 22
-#define R_XTENSA_TLS_GD 23
-#define R_XTENSA_TLS_LDM 24
-#define R_XTENSA_TLS_DTPMOD64 25
-#define R_XTENSA_TLS_DTPOFF64 26
-#define R_XTENSA_TLS_TPOFF64 27
-#define R_XTENSA_TLS_GD64 28
-#define R_XTENSA_TLS_LDM64 29
-#define R_XTENSA_CALL16 30
-#define R_XTENSA_COPY 31
+#define R_XTENSA_PLT 6
+#define R_XTENSA_OP0 8
+#define R_XTENSA_OP1 9
+#define R_XTENSA_OP2 10
+#define R_XTENSA_ASM_EXPAND 11
+#define R_XTENSA_ASM_SIMPLIFY 12
+#define R_XTENSA_32_PCREL 14
+#define R_XTENSA_SLOT0_OP 20
 
 #define ELF32_R_SYM(info) ((info) >> 8)
 #define ELF32_R_TYPE(info) ((info) & 0xff)
@@ -42,12 +27,20 @@ static const char *reloc_type_name(uint32_t type) {
             return "R_XTENSA_NONE";
         case R_XTENSA_32:
             return "R_XTENSA_32";
-        case R_XTENSA_RELATIVE:
-            return "R_XTENSA_RELATIVE";
+        case R_XTENSA_RTLD:
+            return "R_XTENSA_RTLD";
+        case R_XTENSA_GLOB_DAT:
+            return "R_XTENSA_GLOB_DAT";
         case R_XTENSA_JMP_SLOT:
             return "R_XTENSA_JMP_SLOT";
-        case R_XTENSA_CALL16:
-            return "R_XTENSA_CALL16";
+        case R_XTENSA_RELATIVE:
+            return "R_XTENSA_RELATIVE";
+        case R_XTENSA_PLT:
+            return "R_XTENSA_PLT";
+        case R_XTENSA_ASM_EXPAND:
+            return "R_XTENSA_ASM_EXPAND";
+        case R_XTENSA_SLOT0_OP:
+            return "R_XTENSA_SLOT0_OP";
         default:
             return "R_XTENSA_UNKNOWN";
     }

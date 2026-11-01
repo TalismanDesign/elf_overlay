@@ -65,7 +65,7 @@ static void build_hostref_blob(const char *path) {
     assert(m.host_refs);
     m.host_refs[0].overlay_id = 1;
     m.host_refs[0].blob_offset = 0;
-    m.host_refs[0].insn_offset = 0;
+    m.host_refs[0].insn_offset = ELF_OVERLAY_INSN_OFFSET_NONE;
     m.host_refs[0].name_off = 1; /* name starts after the leading NUL */
     m.host_ref_count = 1;
 

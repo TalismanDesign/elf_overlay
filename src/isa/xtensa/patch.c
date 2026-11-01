@@ -59,8 +59,10 @@ static int xtensa_encode_patch(uint8_t *insn, size_t insn_len, uint32_t pc, uint
 
     if (delta % 4 != 0) return -1;
     int32_t imm = delta / 4;
-    // L32R can only reach backwards: -262144 to -4 bytes.
-    if (imm < -0x8000 || imm > -1) return -1;
+    // L32R imm is a 16-bit signed word offset, so it reaches backwards from
+    // -0x10000 words (-262144 bytes) to -1 word (-4 bytes). Matches
+    // xtensa_is_patch_valid's -0x40000..-4 byte window.
+    if (imm < -0x10000 || imm > -1) return -1;
 
     uint8_t reg = (insn[0] >> 4) & 0xF;
     (void)site;

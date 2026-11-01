@@ -79,7 +79,10 @@ static int build_xtensa_stub_block(pack_manifest_t *m) {
         fprintf(f, "    mov.n a14, a6\n");
         fprintf(f, "    mov.n a15, a7\n");
         fprintf(f, "    callx8 a8\n");
+        /* Forward both return words so int64/double/small-struct returns keep
+         * their high half; a scalar return simply ignores a3. */
         fprintf(f, "    mov.n a2, a10\n");
+        fprintf(f, "    mov.n a3, a11\n");
         fprintf(f, "    l32r a10, .Lkey_%zu\n", i);
         fprintf(f, "    l32r a8, overlay_leave_slot\n");
         fprintf(f, "    callx8 a8\n");
@@ -89,39 +92,61 @@ static int build_xtensa_stub_block(pack_manifest_t *m) {
     fprintf(f, "    .p2align 2\n");
     fclose(f);
 
-    snprintf(cmd, sizeof(cmd), "%s -o %s %s", as_path, obj_path, asm_path);
-    if (system(cmd) != 0) return -1;
+    int rc = -1;
+    uint8_t *block = NULL;
+    FILE *bin = NULL;
 
-    snprintf(cmd, sizeof(cmd), "%s -O binary --only-section=.overlay.stubblock %s %s", objcopy_path,
-             obj_path, bin_path);
-    if (system(cmd) != 0) return -1;
+    /* Quote every path: toolchain and temp paths may contain spaces, which an
+     * unquoted shell word would split. */
+    snprintf(cmd, sizeof(cmd), "\"%s\" -o \"%s\" \"%s\"", as_path, obj_path, asm_path);
+    if (system(cmd) != 0) goto cleanup;
 
-    FILE *bin = fopen(bin_path, "rb");
-    if (!bin) return -1;
-    fseek(bin, 0, SEEK_END);
+    snprintf(cmd, sizeof(cmd), "\"%s\" -O binary --only-section=.overlay.stubblock \"%s\" \"%s\"",
+             objcopy_path, obj_path, bin_path);
+    if (system(cmd) != 0) goto cleanup;
+
+    bin = fopen(bin_path, "rb");
+    if (!bin) goto cleanup;
+    if (fseek(bin, 0, SEEK_END) != 0) goto cleanup;
     long len = ftell(bin);
-    fseek(bin, 0, SEEK_SET);
-    if (len <= 0) {
-        fclose(bin);
-        return -1;
+    if (len <= 0) goto cleanup;
+    rewind(bin);
+
+    /* The assembled block must match the size relink reserved from the same
+     * stride formula; a mismatch means the stub body no longer fits its slot. */
+    size_t expected =
+        ELF_OVERLAY_STUB_SLOTS_SIZE + m->stub_count * sizeof(uint32_t) +
+        m->stub_count * XTENSA_STUB_STRIDE;
+    if ((size_t)len != expected) {
+        fprintf(stderr, "stub block size %ld != expected %zu (stride/layout mismatch)\n", len,
+                expected);
+        goto cleanup;
     }
 
-    uint8_t *block = malloc((size_t)len);
-    if (!block) {
-        fclose(bin);
-        return -1;
-    }
+    block = malloc((size_t)len);
+    if (!block) goto cleanup;
     if (fread(block, 1, (size_t)len, bin) != (size_t)len) {
-        fclose(bin);
         free(block);
-        return -1;
+        block = NULL;
+        goto cleanup;
     }
-    fclose(bin);
 
     free(m->stub_block);
     m->stub_block = block;
     m->stub_block_size = (size_t)len;
-    return 0;
+    block = NULL; /* ownership transferred */
+    rc = 0;
+
+cleanup:
+    if (bin) fclose(bin);
+    free(block);
+    /* Remove the scratch files and the temp dir so a failed run leaves nothing
+     * behind. */
+    remove(asm_path);
+    remove(obj_path);
+    remove(bin_path);
+    rmdir(tmpdir);
+    return rc;
 }
 
 int main(int argc, char **argv) {
@@ -138,15 +163,29 @@ int main(int argc, char **argv) {
         fprintf(stderr, "cannot open %s\n", relk_path);
         return 2;
     }
-    fseek(fp, 0, SEEK_END);
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fprintf(stderr, "cannot seek %s\n", relk_path);
+        fclose(fp);
+        return 2;
+    }
     long fsize = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    uint8_t *data = malloc(fsize);
+    if (fsize <= 0) {
+        fprintf(stderr, "empty or unseekable %s\n", relk_path);
+        fclose(fp);
+        return 2;
+    }
+    rewind(fp);
+    uint8_t *data = malloc((size_t)fsize);
     if (!data) {
         fclose(fp);
         return 2;
     }
-    fread(data, 1, fsize, fp);
+    if (fread(data, 1, (size_t)fsize, fp) != (size_t)fsize) {
+        fprintf(stderr, "short read on %s\n", relk_path);
+        free(data);
+        fclose(fp);
+        return 2;
+    }
     fclose(fp);
 
     pack_manifest_t m;

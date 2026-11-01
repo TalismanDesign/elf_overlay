@@ -15,8 +15,10 @@ extern "C" {
 #define ELF_OVERLAY_ISA_ARM 3
 #define ELF_OVERLAY_ISA_AARCH64 4
 
-/* Per-stub byte stride in the generated stub block. */
-#define ELF_OVERLAY_XTENSA_STUB_STRIDE 44
+/* Per-stub byte stride in the generated stub block. The Xtensa stub body is
+ * 44 bytes (entry, arg shuffle, enter/leave calls, both return words); 48
+ * keeps a 4-byte margin and stays word-aligned. */
+#define ELF_OVERLAY_XTENSA_STUB_STRIDE 48
 #define ELF_OVERLAY_RISCV_STUB_STRIDE 32
 #define ELF_OVERLAY_STUB_ALIGNMENT 4
 

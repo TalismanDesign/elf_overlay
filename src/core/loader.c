@@ -144,8 +144,25 @@ void *elf_overlay_enter(uint32_t key) {
 
         slot = pick_victim(l);
         if (slot < 0) {
-            elf_overlay_free(staging);
-            return NULL;
+            if (l->frame_count >= ELF_OVERLAY_MAX_FRAMES) {
+                elf_overlay_log_error(TAG,
+                                      "no free frame for overlay %u: all %u frames pinned",
+                                      overlay_id, (unsigned)l->frame_count);
+                elf_overlay_free(staging);
+                return NULL;
+            }
+            slot = l->frame_count;
+            l->frames[slot].base = elf_overlay_alloc_exec(l->frame_size);
+            if (!l->frames[slot].base) {
+                elf_overlay_free(staging);
+                return NULL;
+            }
+            l->frames[slot].occupied = 0;
+            l->frames[slot].overlay_id = -1;
+            l->frames[slot].body_offset = 0;
+            l->frames[slot].body_len = 0;
+            l->frames[slot].last_use = 0;
+            l->frame_count++;
         }
         uint32_t body_base = (uint32_t)(uintptr_t)l->frames[slot].base;
 
@@ -158,15 +175,27 @@ void *elf_overlay_enter(uint32_t key) {
                 if ((size_t)boff + 4 > ov_len) continue;
                 uint32_t *w = (uint32_t *)(staging + boff);
                 uint32_t resident = 0;
+                /* A plain patch literal may be a relocatable in-image address
+                 * or a bare constant (e.g. 0xDEADBEEF). relink marks required
+                 * resolutions as host_refs; a patch that doesn't resolve is a
+                 * constant and is left untouched rather than failing page-in. */
                 if (elf_overlay_resolve(l, *w, &resident) == ELF_OVERLAY_OK) {
                     *w = resident;
                     uint16_t insn_off = l->patches[i].insn_offset;
-                    if (insn_off != 0 && insn_off + insn_len <= ov_len) {
+                    if (insn_off != ELF_OVERLAY_INSN_OFFSET_NONE &&
+                        insn_off + insn_len <= ov_len) {
                         if (isa && isa->encode_patch) {
                             uint32_t pc_runtime = body_base + insn_off;
                             uint32_t literal_addr = body_base + boff;
-                            isa->encode_patch(staging + insn_off, insn_len, pc_runtime,
-                                              literal_addr, &(elf_overlay_patch_site_t){.reg = 0});
+                            if (isa->encode_patch(staging + insn_off, insn_len, pc_runtime,
+                                                  literal_addr,
+                                                  &(elf_overlay_patch_site_t){.reg = 0}) != 0) {
+                                elf_overlay_log_error(
+                                    TAG, "overlay %u: patch re-encode failed at insn 0x%x",
+                                    overlay_id, insn_off);
+                                elf_overlay_free(staging);
+                                return NULL;
+                            }
                         }
                     }
                 }
@@ -179,12 +208,18 @@ void *elf_overlay_enter(uint32_t key) {
                 uint32_t *w = (uint32_t *)(staging + boff);
                 *w = (uint32_t)(uintptr_t)l->stub_block + *w;
                 uint16_t insn_off = l->stub_patches[i].insn_offset;
-                if (insn_off != 0 && insn_off + insn_len <= ov_len) {
+                if (insn_off != ELF_OVERLAY_INSN_OFFSET_NONE && insn_off + insn_len <= ov_len) {
                     if (isa && isa->encode_patch) {
                         uint32_t pc_runtime = body_base + insn_off;
                         uint32_t literal_addr = body_base + boff;
-                        isa->encode_patch(staging + insn_off, insn_len, pc_runtime, literal_addr,
-                                          &(elf_overlay_patch_site_t){.reg = 0});
+                        if (isa->encode_patch(staging + insn_off, insn_len, pc_runtime, literal_addr,
+                                              &(elf_overlay_patch_site_t){.reg = 0}) != 0) {
+                            elf_overlay_log_error(
+                                TAG, "overlay %u: stub patch re-encode failed at insn 0x%x",
+                                overlay_id, insn_off);
+                            elf_overlay_free(staging);
+                            return NULL;
+                        }
                     }
                 }
             }
@@ -195,6 +230,15 @@ void *elf_overlay_enter(uint32_t key) {
                 uint16_t boff = l->host_refs[i].blob_offset;
                 if ((size_t)boff + 4 > ov_len) continue;
                 uint32_t *w = (uint32_t *)(staging + boff);
+                /* A host ref needs a name string; without a strtab, or with a
+                 * name_off past its end, there's nothing to resolve. */
+                if (!l->strtab || l->host_refs[i].name_off >= l->hdr.strtab_size) {
+                    elf_overlay_log_error(TAG,
+                                          "overlay %u: host ref name_off 0x%x out of strtab",
+                                          overlay_id, l->host_refs[i].name_off);
+                    host_ref_failed = 1;
+                    break;
+                }
                 const char *name = l->strtab + l->host_refs[i].name_off;
                 uintptr_t sym = 0;
                 if (l->symbol_resolver) {
@@ -212,12 +256,18 @@ void *elf_overlay_enter(uint32_t key) {
                 }
                 *w = (uint32_t)sym;
                 uint16_t insn_off = l->host_refs[i].insn_offset;
-                if (insn_off != 0 && insn_off + insn_len <= ov_len) {
+                if (insn_off != ELF_OVERLAY_INSN_OFFSET_NONE && insn_off + insn_len <= ov_len) {
                     if (isa && isa->encode_patch) {
                         uint32_t pc_runtime = body_base + insn_off;
                         uint32_t literal_addr = body_base + boff;
-                        isa->encode_patch(staging + insn_off, insn_len, pc_runtime, literal_addr,
-                                          &(elf_overlay_patch_site_t){.reg = 0});
+                        if (isa->encode_patch(staging + insn_off, insn_len, pc_runtime, literal_addr,
+                                              &(elf_overlay_patch_site_t){.reg = 0}) != 0) {
+                            elf_overlay_log_error(
+                                TAG, "overlay %u: host ref re-encode failed at insn 0x%x",
+                                overlay_id, insn_off);
+                            host_ref_failed = 1;
+                            break;
+                        }
                     }
                 }
             }
@@ -246,6 +296,8 @@ void *elf_overlay_enter(uint32_t key) {
     if (body_off >= l->frames[slot].body_len) {
         elf_overlay_log_error(TAG, "bad body off ov=%u off=0x%x len=0x%x", overlay_id, body_off,
                               (unsigned)l->frames[slot].body_len);
+        /* Release the reference taken above so the frame stays evictable. */
+        if (l->frames[slot].refcount > 0) l->frames[slot].refcount--;
         return NULL;
     }
     return (void *)(l->frames[slot].base + body_off);
@@ -391,24 +443,8 @@ int elf_overlay_load(elf_overlay_loader_t **out, const char *path) {
         elf_overlay_free(stub_staging);
     }
 
-    l->frame_count = ELF_OVERLAY_MAX_FRAMES;
+    l->frame_count = 0;
     l->frame_size = ELF_OVERLAY_DEFAULT_FRAME_SIZE;
-    for (size_t i = 0; i < l->frame_count; i++) {
-        l->frames[i].base = elf_overlay_alloc_exec(l->frame_size);
-        if (!l->frames[i].base) {
-            l->frame_count = i;
-            break;
-        }
-        l->frames[i].occupied = 0;
-        l->frames[i].overlay_id = -1;
-        l->frames[i].body_offset = 0;
-        l->frames[i].body_len = 0;
-        l->frames[i].last_use = 0;
-    }
-    if (l->frame_count == 0 && l->overlay_count > 0) {
-        elf_overlay_unload(l);
-        return ELF_OVERLAY_ERR_MEM;
-    }
     l->clock = 0;
 
     *out = (elf_overlay_loader_t *)l;
@@ -426,6 +462,9 @@ int elf_overlay_load_from_memory(elf_overlay_loader_t **out, const void *data, s
 void elf_overlay_unload(elf_overlay_loader_t *loader) {
     if (!loader) return;
     struct elf_overlay_loader *l = (struct elf_overlay_loader *)loader;
+    /* Drop the active pointer if it names the loader being freed, so a later
+     * enter() can't dereference a dangling pointer. */
+    if (g_active_loader == l) g_active_loader = NULL;
     if (l->file) elf_overlay_file_close(l->file);
     elf_overlay_free(l->overlays);
     elf_overlay_free(l->stubs);
@@ -480,15 +519,23 @@ int elf_overlay_apply_redirects(elf_overlay_loader_t *loader) {
     if (!l->stub_block) return ELF_OVERLAY_ERR_FORMAT;
     if (!l->section_map_set) return ELF_OVERLAY_ERR_FORMAT;
 
+    int failed = 0;
     for (uint16_t i = 0; i < l->redirect_count; i++) {
         uint32_t site = l->redirects[i].site;
         uint32_t val = (uint32_t)(uintptr_t)l->stub_block + l->redirects[i].stub;
         uint32_t dst = 0;
-        if (elf_overlay_resolve(loader, site, &dst) != ELF_OVERLAY_OK) continue;
+        if (elf_overlay_resolve(loader, site, &dst) != ELF_OVERLAY_OK) {
+            /* An unresolved redirect leaves the call site pointing at the
+             * canonical address instead of the stub, so the overlay'd callee
+             * would be invoked at an unloaded address. */
+            elf_overlay_log_error(TAG, "unresolved redirect site 0x%x", site);
+            failed = 1;
+            continue;
+        }
         *(uint32_t *)(uintptr_t)dst = val;
         elf_overlay_sync_exec((void *)(uintptr_t)dst, 4);
     }
-    return ELF_OVERLAY_OK;
+    return failed ? ELF_OVERLAY_ERR_RANGE : ELF_OVERLAY_OK;
 }
 
 void *elf_overlay_get_stub_block(elf_overlay_loader_t *loader) {

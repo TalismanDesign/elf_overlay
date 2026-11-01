@@ -12,6 +12,10 @@ extern "C" {
 
 #define ELF_OVERLAY_ALIGN 4
 
+/* insn_offset sentinel: no instruction re-encode for this patch. Offset 0 is a
+ * valid site (an l32r at the very start of .text), so 0 cannot mean "none". */
+#define ELF_OVERLAY_INSN_OFFSET_NONE 0xFFFF
+
 /* Blob header */
 typedef struct elf_overlay_header {
     char magic[4];

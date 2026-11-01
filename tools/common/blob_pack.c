@@ -4,6 +4,8 @@
 
 #define ELFO_STUB_ALIGN 4
 #define RELK_HDR_SIZE 28
+/* Six u16 table counts follow the 28-byte fixed header. */
+#define RELK_COUNTS_SIZE 12
 
 static size_t align_up(size_t v, size_t a) {
     return (v + a - 1) & ~(a - 1);
@@ -275,7 +277,9 @@ int elf_overlay_manifest_deserialize(pack_manifest_t *m, const uint8_t *data, si
     if (!m || !data) return -1;
     memset(m, 0, sizeof(*m));
 
-    if (len < RELK_HDR_SIZE) return -1;
+    /* The fixed header plus the six u16 counts must both be present before any
+     * field is read, or the count reads at offsets 28..40 run past the end. */
+    if (len < RELK_HDR_SIZE + RELK_COUNTS_SIZE) return -1;
     if (memcmp(data, RELK_MAGIC, 4) != 0) return -1;
 
     size_t off = 4;
