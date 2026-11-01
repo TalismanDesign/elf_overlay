@@ -28,6 +28,9 @@
   "platforms": [
     "espressif32"
   ],
+  "dependencies": {
+    "elf_loader": "*"
+  },
   "export": {
     "include": [
       "src",
